@@ -3,7 +3,7 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { apiRouter } from './server/routes/api.js';
-import { db } from './server/db/store.js';
+import { db } from './server/db/index.js';
 import { seedInitialEventData } from './server/db/seedData.js';
 
 dotenv.config();
@@ -16,10 +16,7 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-  // API Routes
-  app.use('/api', apiRouter);
-
-  // Health check endpoint
+  // Health check endpoint (public, before auth)
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
@@ -29,14 +26,18 @@ async function startServer() {
     });
   });
 
+  // API Routes
+  app.use('/api', apiRouter);
+
   // Seed demo data if database is empty on launch
-  if (db.getAllCanonicalEntities().length === 0) {
-    console.log('Database is empty on start. Populating initial seed data...');
-    try {
-      await seedInitialEventData();
-    } catch (e) {
-      console.warn('Initial seeding failed, will allow manual seeding via UI:', e);
+  try {
+    const existingEntities = await db.getAllCanonicalEntities('org_default');
+    if (existingEntities.length === 0) {
+      console.log('Database is empty on start. Populating initial seed data...');
+      await seedInitialEventData('org_default');
     }
+  } catch (e) {
+    console.warn('Initial seeding check notice:', e);
   }
 
   // Vite middleware for development vs static serve for production
@@ -62,3 +63,4 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('Fatal server startup error:', err);
 });
+

@@ -65,6 +65,27 @@ export function normalizeOrgName(org: string): string {
 }
 
 /**
+ * Stable fingerprint for a person across imports. Diacritics stripped and tokens
+ * sorted so "Nguyễn Văn An" and "An Nguyen Van" collapse to the same key.
+ * Email is included when present because it is the strongest available signal.
+ */
+export function buildIdentityKey(fields: {
+  fullName?: string;
+  organization?: string;
+  email?: string;
+}): string {
+  const name = removeVietnameseDiacritics(normalizePersonName(fields.fullName || ''))
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join('-');
+  const org = removeVietnameseDiacritics(normalizeOrgName(fields.organization || '')).toLowerCase();
+  const email = (fields.email || '').trim().toLowerCase();
+  return `${name}|${org}|${email}`;
+}
+
+/**
  * Generates an informative, standardized identity string for dense vector embedding.
  */
 export function buildIdentityString(data: {
@@ -87,7 +108,13 @@ export function buildIdentityString(data: {
  * Computes Cosine Similarity between two floating point vector arrays.
  */
 export function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  if (!vecA || !vecB || vecA.length !== vecB.length || vecA.length === 0) return 0;
+  if (!vecA || !vecB || vecA.length === 0 || vecB.length === 0) return 0;
+  if (vecA.length !== vecB.length) {
+    // A dimension mismatch means embeddings were produced under different configs.
+    // Returning 0 silently would disable candidate retrieval, so surface it.
+    console.error(`Embedding dimension mismatch: ${vecA.length} vs ${vecB.length}`);
+    return 0;
+  }
   let dotProduct = 0;
   let normA = 0;
   let normB = 0;

@@ -30,7 +30,6 @@ export function initAuthListener(onStateChange: (state: AuthState) => void) {
       });
     } else {
       cachedAccessToken = null;
-      // Default to guest demo mode so all features work immediately out-of-the-box
       onStateChange({
         user: null,
         accessToken: null,
@@ -41,24 +40,17 @@ export function initAuthListener(onStateChange: (state: AuthState) => void) {
   });
 }
 
-export async function loginWithGoogle(): Promise<{ user: User; accessToken: string }> {
+export async function loginWithGoogle(): Promise<{ user: User; accessToken: string; idToken: string }> {
   try {
     const result = await signInWithPopup(auth, googleAuthProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
-    const token = credential?.accessToken || 'demo_token';
-    cachedAccessToken = token;
-    return { user: result.user, accessToken: token };
+    const accessToken = credential?.accessToken || '';
+    const idToken = await result.user.getIdToken();
+    cachedAccessToken = accessToken;
+    return { user: result.user, accessToken, idToken };
   } catch (err: any) {
-    console.warn('Google Sign-In notice:', err?.message);
-    // Gracefully handle iframe popup restrictions by returning a mock authenticated demo user
-    const mockUser: any = {
-      uid: 'user_vietnam_org_01',
-      displayName: 'Chuyên viên ĐMST',
-      email: 'chuyenvien.skhcn@tphcm.gov.vn',
-      photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-    };
-    cachedAccessToken = 'demo_access_token_drive';
-    return { user: mockUser, accessToken: cachedAccessToken };
+    console.error('Google Sign-In Error:', err);
+    throw err;
   }
 }
 
@@ -72,4 +64,3 @@ export async function logoutUser(): Promise<void> {
 export function getCachedToken(): string | null {
   return cachedAccessToken;
 }
-

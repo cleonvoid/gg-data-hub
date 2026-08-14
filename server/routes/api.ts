@@ -1,5 +1,5 @@
-import { Router, Request, Response } from 'express';
-import { db } from '../db/store.js';
+import { Router, Response } from 'express';
+import { db } from '../db/index.js';
 import {
   inferSchemaMapping,
   generateIdentityEmbedding,
@@ -18,16 +18,21 @@ import {
   ColumnMappingItem,
   MergeSuggestion,
 } from '../../src/types/index.js';
-import { buildIdentityString } from '../utils/vietnamese.js';
+import { buildIdentityString, buildIdentityKey } from '../utils/vietnamese.js';
+import { requireAuth, AuthenticatedRequest } from '../middleware/requireAuth.js';
 
 export const apiRouter = Router();
+
+// Apply authentication middleware to all API routes
+apiRouter.use(requireAuth);
 
 /**
  * 1. Summary Stats
  */
-apiRouter.get('/stats', (req: Request, res: Response) => {
+apiRouter.get('/stats', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const stats = db.getStats();
+    const orgId = req.user?.orgId || 'org_default';
+    const stats = await db.getStats(orgId);
     res.json(stats);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -37,8 +42,9 @@ apiRouter.get('/stats', (req: Request, res: Response) => {
 /**
  * 2. Query Canonical Entities
  */
-apiRouter.get('/entities', (req: Request, res: Response) => {
+apiRouter.get('/entities', async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const orgId = req.user?.orgId || 'org_default';
     const {
       search,
       organization,
@@ -55,7 +61,7 @@ apiRouter.get('/entities', (req: Request, res: Response) => {
       } catch {}
     }
 
-    const result = db.queryEntities({
+    const result = await db.queryEntities(orgId, {
       search: search ? String(search) : undefined,
       organization: organization ? String(organization) : undefined,
       minAppearances: minAppearances ? Number(minAppearances) : undefined,
@@ -73,9 +79,10 @@ apiRouter.get('/entities', (req: Request, res: Response) => {
 /**
  * 3. Canonical Entity Details & Lineage (Raw Records + Diffs)
  */
-apiRouter.get('/entities/:id', (req: Request, res: Response) => {
+apiRouter.get('/entities/:id', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const details = db.getEntityDetails(req.params.id);
+    const orgId = req.user?.orgId || 'org_default';
+    const details = await db.getEntityDetails(orgId, req.params.id);
     if (!details) {
       return res.status(404).json({ error: 'Không tìm thấy thực thể chuẩn hóa' });
     }
@@ -88,7 +95,7 @@ apiRouter.get('/entities/:id', (req: Request, res: Response) => {
 /**
  * 4. AI Schema Mapping Inference
  */
-apiRouter.post('/schema/infer', async (req: Request, res: Response) => {
+apiRouter.post('/schema/infer', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { rows, fileName } = req.body;
     if (!rows || !Array.isArray(rows)) {
@@ -105,8 +112,9 @@ apiRouter.post('/schema/infer', async (req: Request, res: Response) => {
 /**
  * 5. Import & Ingestion with Two-Stage Entity Resolution
  */
-apiRouter.post('/ingest', async (req: Request, res: Response) => {
+apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const orgId = req.user?.orgId || 'org_default';
     const {
       sourceFileId,
       sourceFileName,
@@ -123,11 +131,11 @@ apiRouter.post('/ingest', async (req: Request, res: Response) => {
     }
 
     const dataRows = rows.slice((headerRowIndex ?? 0) + 1);
-    const validMappings = mappings.filter((m: ColumnMappingItem) => m.targetField !== 'ignore');
 
     const createdRecordIds: string[] = [];
     const newSuggestions: MergeSuggestion[] = [];
     let autoCreatedEntitiesCount = 0;
+    let fallbackEmbeddingCount = 0;
 
     for (let rIdx = 0; rIdx < dataRows.length; rIdx++) {
       const row = dataRows[rIdx];
@@ -164,8 +172,19 @@ apiRouter.post('/ingest', async (req: Request, res: Response) => {
         email: parsedFields.email,
       });
 
+      const identityKey = buildIdentityKey({
+        fullName: parsedFields.fullName,
+        organization: parsedFields.organization,
+        email: parsedFields.email,
+      });
+
       // 2. Generate dense vector embedding for Stage 1 candidate retrieval
-      const embedding = await generateIdentityEmbedding(normalizedIdentityKey);
+      const embResult = await generateIdentityEmbedding(normalizedIdentityKey);
+      const embedding = embResult.vector;
+      const embeddingSource = embResult.source;
+      if (embeddingSource === 'fallback') {
+        fallbackEmbeddingCount++;
+      }
 
       const rawRecord: RawSourceRecord = {
         id: recId,
@@ -176,24 +195,30 @@ apiRouter.post('/ingest', async (req: Request, res: Response) => {
         rawJson,
         parsedFields,
         normalizedIdentityKey,
+        identityKey,
         embedding,
+        embeddingSource,
         importedAt: new Date().toISOString(),
-        orgId: 'org_default',
+        orgId,
       };
 
       // Store Layer 1 Raw Record (Immutable)
-      db.addRawRecord(rawRecord);
+      await db.addRawRecord(rawRecord);
       createdRecordIds.push(rawRecord.id);
 
       // --- Stage 1: Vector Similarity Candidate Retrieval ---
-      const topCandidates = db.findTopCandidatesByVector(embedding, 3, 0.68);
+      const topCandidates = await db.findTopCandidatesByVector(orgId, embedding, 3, 0.68);
 
       let foundMatch = false;
 
-      // Filter out candidates previously rejected by user
-      const eligibleCandidates = topCandidates.filter(
-        (cand) => !db.isPairRejected(rawRecord.id, cand.entity.id)
-      );
+      // Filter out candidates previously rejected by user (Task 4: checked by identityKey)
+      const eligibleCandidates: { entity: any; similarity: number }[] = [];
+      for (const cand of topCandidates) {
+        const isRejected = await db.isPairRejected(orgId, identityKey, cand.entity.id);
+        if (!isRejected) {
+          eligibleCandidates.push(cand);
+        }
+      }
 
       if (eligibleCandidates.length > 0) {
         // --- Stage 2: LLM Adjudication for Top Candidate ---
@@ -233,7 +258,7 @@ apiRouter.post('/ingest', async (req: Request, res: Response) => {
               createdAt: new Date().toISOString(),
             };
 
-            db.addPendingSuggestion(suggestion);
+            await db.addPendingSuggestion(suggestion);
             newSuggestions.push(suggestion);
             foundMatch = true;
             break;
@@ -243,18 +268,20 @@ apiRouter.post('/ingest', async (req: Request, res: Response) => {
 
       // If no valid candidate found, create a new authoritative Canonical Entity
       if (!foundMatch) {
-        const newEntity = db.createCanonicalEntity({
+        const newEntity = await db.createCanonicalEntity(orgId, {
           entityType: 'person',
           canonicalName: parsedFields.fullName || 'Khách không tên',
           canonicalOrg: parsedFields.organization,
           canonicalRole: parsedFields.role,
           canonicalEmail: parsedFields.email,
           canonicalPhone: parsedFields.phone,
+          embedding,
+          orgId,
         });
 
         // Link raw record to the new canonical entity
         const linkId = `link_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        db.addEntityLink({
+        await db.addEntityLink({
           id: linkId,
           rawRecordId: rawRecord.id,
           canonicalEntityId: newEntity.id,
@@ -263,6 +290,7 @@ apiRouter.post('/ingest', async (req: Request, res: Response) => {
           stage2Confidence: 1.0,
           adjudicationReason: 'Khởi tạo thực thể chuẩn mới (không có ứng viên trùng khớp)',
           decidedBy: 'system_initial',
+          decidedAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
@@ -276,6 +304,7 @@ apiRouter.post('/ingest', async (req: Request, res: Response) => {
       totalIngested: createdRecordIds.length,
       newEntitiesCreated: autoCreatedEntitiesCount,
       pendingMergeSuggestionsCount: newSuggestions.length,
+      fallbackEmbeddingCount,
       suggestions: newSuggestions,
     });
   } catch (err: any) {
@@ -287,9 +316,10 @@ apiRouter.post('/ingest', async (req: Request, res: Response) => {
 /**
  * 6. Pending Merge Suggestions
  */
-apiRouter.get('/merges/pending', (req: Request, res: Response) => {
+apiRouter.get('/merges/pending', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const suggestions = db.getPendingSuggestions();
+    const orgId = req.user?.orgId || 'org_default';
+    const suggestions = await db.getPendingSuggestions(orgId);
     res.json(suggestions);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -299,8 +329,9 @@ apiRouter.get('/merges/pending', (req: Request, res: Response) => {
 /**
  * 7. Adjudicate Merge Suggestion (Approve or Reject)
  */
-apiRouter.post('/merges/adjudicate', (req: Request, res: Response) => {
+apiRouter.post('/merges/adjudicate', async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const orgId = req.user?.orgId || 'org_default';
     const { suggestionId, rawRecordId, canonicalEntityId, action, reason } = req.body;
 
     if (!suggestionId || !rawRecordId || !canonicalEntityId || !action) {
@@ -308,10 +339,10 @@ apiRouter.post('/merges/adjudicate', (req: Request, res: Response) => {
     }
 
     if (action === 'approve') {
-      const result = db.approveMerge(suggestionId, rawRecordId, canonicalEntityId, 'user');
+      const result = await db.approveMerge(orgId, suggestionId, rawRecordId, canonicalEntityId, 'user');
       return res.json({ success: true, action: 'approved', canonicalEntity: result.canonicalEntity });
     } else if (action === 'reject') {
-      db.rejectMerge(suggestionId, rawRecordId, canonicalEntityId, reason || 'Người dùng từ chối gộp');
+      await db.rejectMerge(orgId, suggestionId, rawRecordId, canonicalEntityId, reason || 'Người dùng từ chối gộp');
       return res.json({ success: true, action: 'rejected' });
     } else {
       return res.status(400).json({ error: 'Hành động không hợp lệ' });
@@ -324,7 +355,7 @@ apiRouter.post('/merges/adjudicate', (req: Request, res: Response) => {
 /**
  * 8. Natural Language Search Translation
  */
-apiRouter.post('/search/translate', async (req: Request, res: Response) => {
+apiRouter.post('/search/translate', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { query } = req.body;
     if (!query || typeof query !== 'string') {
@@ -341,7 +372,7 @@ apiRouter.post('/search/translate', async (req: Request, res: Response) => {
 /**
  * 9. Google Drive File Browser
  */
-apiRouter.get('/drive/files', async (req: Request, res: Response) => {
+apiRouter.get('/drive/files', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
@@ -355,7 +386,7 @@ apiRouter.get('/drive/files', async (req: Request, res: Response) => {
 /**
  * 10. Fetch Sheet Rows from Drive
  */
-apiRouter.post('/drive/fetch', async (req: Request, res: Response) => {
+apiRouter.post('/drive/fetch', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { fileId } = req.body;
     const authHeader = req.headers.authorization;
@@ -375,7 +406,7 @@ apiRouter.post('/drive/fetch', async (req: Request, res: Response) => {
 /**
  * 11. Parse Local XLSX File (Base64 or JSON buffer)
  */
-apiRouter.post('/upload/parse', (req: Request, res: Response) => {
+apiRouter.post('/upload/parse', (req: AuthenticatedRequest, res: Response) => {
   try {
     const { base64Data, fileName } = req.body;
     if (!base64Data) {
@@ -393,10 +424,11 @@ apiRouter.post('/upload/parse', (req: Request, res: Response) => {
 /**
  * 12. Seed / Reset Demo Data
  */
-apiRouter.post('/seed', async (req: Request, res: Response) => {
+apiRouter.post('/seed', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    await seedInitialEventData();
-    const stats = db.getStats();
+    const orgId = req.user?.orgId || 'org_default';
+    await seedInitialEventData(orgId);
+    const stats = await db.getStats(orgId);
     res.json({ success: true, message: 'Đã nạp dữ liệu mẫu thành công', stats });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

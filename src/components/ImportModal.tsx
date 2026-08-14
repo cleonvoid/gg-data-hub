@@ -36,6 +36,7 @@ interface ImportModalProps {
     totalIngested: number;
     newEntitiesCreated: number;
     pendingMergeSuggestionsCount: number;
+    fallbackEmbeddingCount?: number;
     suggestions: MergeSuggestion[];
   }) => void;
 }

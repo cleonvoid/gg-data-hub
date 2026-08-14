@@ -2,14 +2,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global Safety Net: Default-deny catch-all
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
     // Helper functions
     function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128;
     }
 
     function isSignedIn() {
@@ -24,45 +19,49 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isAdmin() {
-      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
-    }
-
     // Canonical Entities Collection
     match /canonicalEntities/{entityId} {
       allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(entityId) && incoming().canonicalName is string && incoming().canonicalName.size() <= 200;
-      allow update: if isSignedIn() && isValidId(entityId) && incoming().canonicalName is string && incoming().canonicalName.size() <= 200;
-      allow delete: if isAdmin();
+      allow create, update: if isSignedIn() && isValidId(entityId);
+      allow delete: if isSignedIn();
     }
 
     // Raw Source Records Collection (Immutable attendee rows)
     match /rawRecords/{rawRecordId} {
       allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(rawRecordId) && incoming().sourceFileId is string;
-      allow update, delete: if isAdmin();
+      allow create, update: if isSignedIn() && isValidId(rawRecordId);
+      allow delete: if isSignedIn();
     }
 
     // Entity Links Collection
     match /entityLinks/{linkId} {
       allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(linkId);
-      allow update: if isSignedIn() && isValidId(linkId);
-      allow delete: if isAdmin();
+      allow create, update: if isSignedIn() && isValidId(linkId);
+      allow delete: if isSignedIn();
     }
 
-    // Merge Suggestions Collection
-    match /mergeSuggestions/{suggestionId} {
+    // Pending Suggestions Collection
+    match /pendingSuggestions/{suggestionId} {
       allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(suggestionId);
-      allow update: if isSignedIn() && isValidId(suggestionId);
-      allow delete: if isSignedIn() && isValidId(suggestionId);
+      allow create, update, delete: if isSignedIn() && isValidId(suggestionId);
     }
 
-    // Admin authorization document
-    match /admins/{adminId} {
-      allow read: if isSignedIn() && request.auth.uid == adminId;
-      allow write: if false;
+    // Rejections Collection
+    match /rejections/{rejectionId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && isValidId(rejectionId);
+    }
+
+    // User Profile Documents
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow create, update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

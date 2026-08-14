@@ -264,9 +264,28 @@ export const EntityDetailDrawer: React.FC<EntityDetailDrawerProps> = ({
                       </div>
 
                       {/* Adjudication Verdict info */}
-                      <div className="flex items-center justify-between text-[10px] text-[#6B7280] font-semibold pt-1 border-t border-[#F3F4F6]">
-                        <span>Lý do phân giải: {item.link.adjudicationReason}</span>
-                        <span className="font-mono font-bold text-[#2563EB]">Độ tin cậy: {Math.round(item.link.stage2Confidence * 100)}%</span>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[10px] text-[#6B7280] font-semibold pt-1.5 border-t border-[#F3F4F6] gap-1">
+                        <span className="truncate" title={item.link.adjudicationReason}>
+                          Lý do phân giải: <strong className="text-[#374151]">{item.link.adjudicationReason || '—'}</strong>
+                        </span>
+                        <div className="flex items-center space-x-3 shrink-0">
+                          <span>
+                            Độ tương đồng (GĐ1):{' '}
+                            <strong className="font-mono text-[#4B5563]">
+                              {item.link.stage1SimilarityScore !== null && item.link.stage1SimilarityScore !== undefined
+                                ? `${Math.round(item.link.stage1SimilarityScore * 100)}%`
+                                : '—'}
+                            </strong>
+                          </span>
+                          <span>
+                            Độ tin cậy LLM (GĐ2):{' '}
+                            <strong className="font-mono text-[#2563EB]">
+                              {item.link.stage2Confidence !== null && item.link.stage2Confidence !== undefined
+                                ? `${Math.round(item.link.stage2Confidence * 100)}%`
+                                : '—'}
+                            </strong>
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}

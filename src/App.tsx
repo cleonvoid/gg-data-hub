@@ -131,7 +131,9 @@ export function App() {
   const handleImportComplete = (summary: any) => {
     loadStatsAndMerges();
     loadEntities();
-    if (summary.pendingMergeSuggestionsCount > 0) {
+    if (summary.fallbackEmbeddingCount && summary.fallbackEmbeddingCount > 0) {
+      showToast(`Cảnh báo: ${summary.fallbackEmbeddingCount} bản ghi dùng vector dự phòng do dịch vụ embedding không khả dụng. Chất lượng phân giải thực thể bị giảm.`);
+    } else if (summary.pendingMergeSuggestionsCount > 0) {
       setIsMergeModalOpen(true);
       showToast(`Đã nạp ${summary.totalIngested} bản ghi. Phát hiện ${summary.pendingMergeSuggestionsCount} trường hợp cần duyệt gộp!`);
     } else {

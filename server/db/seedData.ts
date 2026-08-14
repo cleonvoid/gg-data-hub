@@ -1,110 +1,117 @@
-import { db } from './store.js';
+import { db } from './index.js';
 import { RawSourceRecord, CanonicalEntity, EntityLink, MergeSuggestion } from '../../src/types/index.js';
 import { generateIdentityEmbedding } from '../services/geminiService.js';
 import { buildIdentityString } from '../utils/vietnamese.js';
 
-export async function seedInitialEventData() {
-  db.clearAll();
+export async function seedInitialEventData(orgId: string = 'org_default') {
+  await db.clearAll(orgId);
 
-  console.log('Seeding realistic multi-event dataset...');
+  console.log(`Seeding realistic multi-event dataset for ${orgId}...`);
 
   // 1. Initial canonical entities
-  const canonical1 = db.createCanonicalEntity({
+  const canonical1 = await db.createCanonicalEntity(orgId, {
     entityType: 'person',
     canonicalName: 'TS. Nguyễn Văn An',
     canonicalOrg: 'Viện Công nghệ Thông tin - Viện Hàn lâm KH&CN',
     canonicalRole: 'Trưởng phòng Nghiên cứu Trí tuệ Nhân tạo',
     canonicalEmail: 'an.nguyen@vast.gov.vn',
     canonicalPhone: '0912345678',
+    orgId,
   });
   canonical1.aliases = ['TS. Nguyễn Văn An', 'Nguyen Van An', 'Nguyễn V. An'];
   canonical1.alternateOrgs = ['Viện Công nghệ Thông tin - VAST', 'Vien CNTT VAST'];
   canonical1.alternateEmails = ['an.nguyen@vast.gov.vn', 'annguyen.ai.vast@gmail.com'];
   canonical1.eventAppearancesCount = 3;
   canonical1.sourceFilesCount = 3;
-  db.updateCanonicalEntity(canonical1);
+  await db.updateCanonicalEntity(orgId, canonical1.id, canonical1);
 
-  const canonical2 = db.createCanonicalEntity({
+  const canonical2 = await db.createCanonicalEntity(orgId, {
     entityType: 'person',
     canonicalName: 'ThS. Trần Thị Mai Lan',
     canonicalOrg: 'Công ty Cổ phần Công nghệ FPT',
     canonicalRole: 'Giám đốc Giải pháp Chuyển đổi số',
     canonicalEmail: 'lan.ttm@fpt.com',
     canonicalPhone: '0987654321',
+    orgId,
   });
   canonical2.aliases = ['ThS. Trần Thị Mai Lan', 'Tran Thi Mai Lan', 'Trần Mai Lan'];
   canonical2.alternateOrgs = ['FPT Corporation', 'Tập đoàn FPT', 'CTCP FPT'];
   canonical2.alternateEmails = ['lan.ttm@fpt.com', 'lan.tran@fpt.com.vn'];
   canonical2.eventAppearancesCount = 3;
   canonical2.sourceFilesCount = 3;
-  db.updateCanonicalEntity(canonical2);
+  await db.updateCanonicalEntity(orgId, canonical2.id, canonical2);
 
-  const canonical3 = db.createCanonicalEntity({
+  const canonical3 = await db.createCanonicalEntity(orgId, {
     entityType: 'person',
     canonicalName: 'PGS.TS. Phạm Minh Tuấn',
     canonicalOrg: 'Trường Đại học Bách Khoa TP.HCM',
     canonicalRole: 'Giảng viên Cao cấp / Viện trưởng Viện AI',
     canonicalEmail: 'pmtuan@hcmut.edu.vn',
     canonicalPhone: '0938445566',
+    orgId,
   });
   canonical3.aliases = ['PGS.TS. Phạm Minh Tuấn', 'Pham Minh Tuan', 'TS. Phạm Minh Tuấn'];
   canonical3.alternateOrgs = ['ĐH Bách Khoa TP.HCM', 'HCMUT - Bach Khoa'];
   canonical3.alternateEmails = ['pmtuan@hcmut.edu.vn', 'tuanpham.ai@gmail.com'];
   canonical3.eventAppearancesCount = 2;
   canonical3.sourceFilesCount = 2;
-  db.updateCanonicalEntity(canonical3);
+  await db.updateCanonicalEntity(orgId, canonical3.id, canonical3);
 
-  const canonical4 = db.createCanonicalEntity({
+  const canonical4 = await db.createCanonicalEntity(orgId, {
     entityType: 'person',
     canonicalName: 'Lê Hoàng Long',
     canonicalOrg: 'Sở Khoa học và Công nghệ TP. Hồ Chí Minh',
     canonicalRole: 'Phó Trưởng phòng Quản lý Công nghệ',
     canonicalEmail: 'longlh.skhcn@tphcm.gov.vn',
     canonicalPhone: '0903112233',
+    orgId,
   });
   canonical4.aliases = ['Lê Hoàng Long', 'Ông Lê Hoàng Long', 'Le Hoang Long'];
   canonical4.alternateEmails = ['longlh.skhcn@tphcm.gov.vn', 'longlh@gmail.com'];
   canonical4.eventAppearancesCount = 2;
   canonical4.sourceFilesCount = 2;
-  db.updateCanonicalEntity(canonical4);
+  await db.updateCanonicalEntity(orgId, canonical4.id, canonical4);
 
-  const canonical5 = db.createCanonicalEntity({
+  const canonical5 = await db.createCanonicalEntity(orgId, {
     entityType: 'person',
     canonicalName: 'Đặng Quốc Bảo',
     canonicalOrg: 'Tập đoàn Công nghiệp - Viễn thông Quân đội (Viettel)',
     canonicalRole: 'Kỹ sư trưởng Cloud & Hạ tầng AI',
     canonicalEmail: 'baodq@viettel.com.vn',
     canonicalPhone: '0977889900',
+    orgId,
   });
   canonical5.aliases = ['Đặng Quốc Bảo', 'Dang Quoc Bao'];
   canonical5.alternateOrgs = ['Tập đoàn Viettel', 'Viettel Solutions'];
   canonical5.eventAppearancesCount = 2;
   canonical5.sourceFilesCount = 2;
-  db.updateCanonicalEntity(canonical5);
+  await db.updateCanonicalEntity(orgId, canonical5.id, canonical5);
 
-  const canonical6 = db.createCanonicalEntity({
+  const canonical6 = await db.createCanonicalEntity(orgId, {
     entityType: 'person',
     canonicalName: 'Võ Thị Bích Ngọc',
     canonicalOrg: 'Trung tâm Đổi mới sáng tạo Quốc gia (NIC)',
     canonicalRole: 'Chuyên viên Điều phối Chương trình Đổi mới sáng tạo',
     canonicalEmail: 'ngocvtb@nic.gov.vn',
     canonicalPhone: '0944556677',
+    orgId,
   });
   canonical6.eventAppearancesCount = 1;
   canonical6.sourceFilesCount = 1;
-  db.updateCanonicalEntity(canonical6);
+  await db.updateCanonicalEntity(orgId, canonical6.id, canonical6);
 
-  const canonical7 = db.createCanonicalEntity({
+  const canonical7 = await db.createCanonicalEntity(orgId, {
     entityType: 'person',
     canonicalName: 'Hoàng Minh Đức',
     canonicalOrg: 'Công ty Cổ phần Tập đoàn Công nghệ CMC',
     canonicalRole: 'Chuyên gia Kiến trúc Giải pháp Dữ liệu',
     canonicalEmail: 'duc.hm@cmc.com.vn',
     canonicalPhone: '0922334455',
+    orgId,
   });
   canonical7.eventAppearancesCount = 1;
   canonical7.sourceFilesCount = 1;
-  db.updateCanonicalEntity(canonical7);
+  await db.updateCanonicalEntity(orgId, canonical7.id, canonical7);
 
   // 2. Add Raw Source Records across 4 realistic event files
   const rawList: {
@@ -540,12 +547,13 @@ export async function seedInitialEventData() {
 
   // Store raw records, generate embeddings, and build links
   for (const item of rawList) {
-    const embedding = await generateIdentityEmbedding(item.record.normalizedIdentityKey);
-    item.record.embedding = embedding;
-    db.addRawRecord(item.record);
+    const embResult = await generateIdentityEmbedding(item.record.normalizedIdentityKey);
+    item.record.embedding = embResult.vector;
+    item.record.embeddingSource = embResult.source;
+    await db.addRawRecord(item.record);
 
     if (item.canonicalId) {
-      db.addEntityLink({
+      await db.addEntityLink({
         id: `link_seed_${item.record.id}`,
         rawRecordId: item.record.id,
         canonicalEntityId: item.canonicalId,
@@ -590,12 +598,14 @@ export async function seedInitialEventData() {
       email: 'annguyen.ai.vast@gmail.com',
     }),
     importedAt: '2025-11-20T10:00:00Z',
-    orgId: 'org_default',
+    orgId,
   };
-  pendingRecord1.embedding = await generateIdentityEmbedding(pendingRecord1.normalizedIdentityKey);
-  db.addRawRecord(pendingRecord1);
+  const embResult1 = await generateIdentityEmbedding(pendingRecord1.normalizedIdentityKey);
+  pendingRecord1.embedding = embResult1.vector;
+  pendingRecord1.embeddingSource = embResult1.source;
+  await db.addRawRecord(pendingRecord1);
 
-  db.addPendingSuggestion({
+  await db.addPendingSuggestion({
     id: 'sugg_01',
     rawRecord: pendingRecord1,
     targetCanonicalEntity: canonical1,
@@ -640,12 +650,14 @@ export async function seedInitialEventData() {
       email: 'lan.ttm@fpt.com',
     }),
     importedAt: '2025-11-20T10:00:00Z',
-    orgId: 'org_default',
+    orgId,
   };
-  pendingRecord2.embedding = await generateIdentityEmbedding(pendingRecord2.normalizedIdentityKey);
-  db.addRawRecord(pendingRecord2);
+  const embResult2 = await generateIdentityEmbedding(pendingRecord2.normalizedIdentityKey);
+  pendingRecord2.embedding = embResult2.vector;
+  pendingRecord2.embeddingSource = embResult2.source;
+  await db.addRawRecord(pendingRecord2);
 
-  db.addPendingSuggestion({
+  await db.addPendingSuggestion({
     id: 'sugg_02',
     rawRecord: pendingRecord2,
     targetCanonicalEntity: canonical2,

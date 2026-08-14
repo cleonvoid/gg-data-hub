@@ -38,7 +38,9 @@ export interface RawSourceRecord {
   rawJson: Record<string, any>;
   parsedFields: Partial<CanonicalSchema>;
   normalizedIdentityKey: string;
+  identityKey?: string;
   embedding?: number[];
+  embeddingSource?: 'gemini' | 'fallback';
   importedAt: string;
   orgId: string;
 }
@@ -59,6 +61,7 @@ export interface CanonicalEntity {
   lastSeenAt: string;
   sourceFilesCount: number;
   confidenceScore: number;
+  embedding?: number[];
   orgId: string;
   createdAt: string;
   updatedAt: string;
@@ -71,10 +74,11 @@ export interface EntityLink {
   rawRecordId: string;
   canonicalEntityId: string;
   status: MergeDecisionStatus;
-  stage1SimilarityScore: number;
-  stage2Confidence: number;
+  stage1SimilarityScore: number | null;
+  stage2Confidence: number | null;
   adjudicationReason: string;
-  decidedBy: 'user' | 'system_initial';
+  decidedBy: 'user' | 'system_initial' | 'auto_merge';
+  decidedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

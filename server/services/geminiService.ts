@@ -17,6 +17,11 @@ const ai = new GoogleGenAI({
   },
 });
 
+// Pinned so API embeddings and the local fallback share a dimension, and so the
+// Firestore vector index dimension (Task 5) stays in sync. gemini-embedding-2-preview
+// defaults to 3072; 768 is a supported MRL truncation and is auto-normalized by the model.
+export const EMBEDDING_DIM = 768;
+
 const PRIMARY_MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
 const FALLBACK_MODELS = ['gemini-flash-latest', 'gemini-3.1-flash-lite'];
 const EMBEDDING_MODELS = ['gemini-embedding-2-preview'];
@@ -307,13 +312,18 @@ Lưu ý:
   }
 }
 
+export interface EmbeddingResult {
+  vector: number[];
+  source: 'gemini' | 'fallback';
+}
+
 /**
  * 2. Generate Dense Embedding Vector
  * Generates vector representation for candidate identity string using Gemini or dense hash fallback.
  */
-export async function generateIdentityEmbedding(text: string): Promise<number[]> {
+export async function generateIdentityEmbedding(text: string): Promise<EmbeddingResult> {
   if (!process.env.GEMINI_API_KEY) {
-    return generateDeterministicFallbackEmbedding(text);
+    return { vector: generateDeterministicFallbackEmbedding(text), source: 'fallback' };
   }
 
   try {
@@ -322,6 +332,7 @@ export async function generateIdentityEmbedding(text: string): Promise<number[]>
         return await ai.models.embedContent({
           model: modelName,
           contents: text,
+          config: { outputDimensionality: EMBEDDING_DIM },
         });
       },
       EMBEDDING_MODELS,
@@ -330,18 +341,19 @@ export async function generateIdentityEmbedding(text: string): Promise<number[]>
 
     const values = (response as any).embeddings?.[0]?.values || (response as any).embedding?.values;
     if (values && values.length > 0) {
-      return values;
+      return { vector: values, source: 'gemini' };
     }
-    return generateDeterministicFallbackEmbedding(text);
-  } catch (_err) {
-    return generateDeterministicFallbackEmbedding(text);
+    return { vector: generateDeterministicFallbackEmbedding(text), source: 'fallback' };
+  } catch (err) {
+    console.warn('Embedding API failed, using deterministic fallback (entity resolution quality degraded):', err);
+    return { vector: generateDeterministicFallbackEmbedding(text), source: 'fallback' };
   }
 }
 
 /**
  * High-dimensional deterministic vector projector for zero-latency local fallback.
  */
-function generateDeterministicFallbackEmbedding(text: string, dim: number = 768): number[] {
+function generateDeterministicFallbackEmbedding(text: string, dim: number = EMBEDDING_DIM): number[] {
   const vec = new Array(dim).fill(0);
   const normalized = text.toLowerCase();
   for (let i = 0; i < normalized.length; i++) {
