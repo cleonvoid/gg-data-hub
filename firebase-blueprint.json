@@ -1,0 +1,240 @@
+{
+  "entities": {
+    "CanonicalEntity": {
+      "title": "CanonicalEntity",
+      "description": "Golden master record for a deduplicated person or organization entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "entityType": {
+          "type": "string",
+          "enum": ["person", "organization"]
+        },
+        "canonicalName": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "canonicalOrg": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "canonicalRole": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "canonicalEmail": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "canonicalPhone": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "aliases": {
+          "type": "array"
+        },
+        "alternateEmails": {
+          "type": "array"
+        },
+        "alternateOrgs": {
+          "type": "array"
+        },
+        "eventAppearancesCount": {
+          "type": "number"
+        },
+        "firstSeenAt": {
+          "type": "string"
+        },
+        "lastSeenAt": {
+          "type": "string"
+        },
+        "sourceFilesCount": {
+          "type": "number"
+        },
+        "confidenceScore": {
+          "type": "number"
+        },
+        "orgId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "entityType",
+        "canonicalName",
+        "eventAppearancesCount",
+        "sourceFilesCount",
+        "confidenceScore",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "RawSourceRecord": {
+      "title": "RawSourceRecord",
+      "description": "Immutable source attendee row from an ingested spreadsheet",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sourceFileId": {
+          "type": "string"
+        },
+        "sourceFileName": {
+          "type": "string"
+        },
+        "sourceType": {
+          "type": "string",
+          "enum": ["drive_sheets", "local_xlsx", "seed"]
+        },
+        "rowIndex": {
+          "type": "number"
+        },
+        "rawValues": {
+          "type": "object"
+        },
+        "parsedFields": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sourceFileId",
+        "sourceFileName",
+        "sourceType",
+        "rowIndex",
+        "rawValues",
+        "parsedFields",
+        "createdAt"
+      ]
+    },
+    "EntityLink": {
+      "title": "EntityLink",
+      "description": "Audit link mapping raw source records to canonical entities",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "rawRecordId": {
+          "type": "string"
+        },
+        "canonicalEntityId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["approved", "rejected", "pending_review"]
+        },
+        "stage1SimilarityScore": {
+          "type": "number"
+        },
+        "stage2Confidence": {
+          "type": "number"
+        },
+        "adjudicationReason": {
+          "type": "string"
+        },
+        "decidedBy": {
+          "type": "string",
+          "enum": ["system_initial", "user", "auto_merge"]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "rawRecordId",
+        "canonicalEntityId",
+        "status",
+        "stage1SimilarityScore",
+        "stage2Confidence",
+        "adjudicationReason",
+        "decidedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MergeSuggestion": {
+      "title": "MergeSuggestion",
+      "description": "Two-stage AI merge recommendation pending human adjudication",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "rawRecordId": {
+          "type": "string"
+        },
+        "canonicalEntityId": {
+          "type": "string"
+        },
+        "stage1SimilarityScore": {
+          "type": "number"
+        },
+        "stage2Confidence": {
+          "type": "number"
+        },
+        "aiReasoningVi": {
+          "type": "string"
+        },
+        "aiReasoningEn": {
+          "type": "string"
+        },
+        "keyDifferences": {
+          "type": "array"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "rawRecordId",
+        "canonicalEntityId",
+        "stage1SimilarityScore",
+        "stage2Confidence",
+        "aiReasoningVi",
+        "status",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/canonicalEntities/{entityId}": {
+      "schema": "CanonicalEntity",
+      "description": "Deduplicated canonical person and organization entities"
+    },
+    "/rawRecords/{rawRecordId}": {
+      "schema": "RawSourceRecord",
+      "description": "Raw immutable spreadsheet row entries"
+    },
+    "/entityLinks/{linkId}": {
+      "schema": "EntityLink",
+      "description": "Adjudicated links between raw records and canonical master entities"
+    },
+    "/mergeSuggestions/{suggestionId}": {
+      "schema": "MergeSuggestion",
+      "description": "Active AI deduplication proposals pending review"
+    }
+  }
+}

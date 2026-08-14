@@ -1,30 +1,16 @@
-import { initializeApp, getApps } from 'firebase/app';
 import {
-  getAuth,
   signInWithPopup,
   GoogleAuthProvider,
   onAuthStateChanged,
   User,
   signOut,
 } from 'firebase/auth';
+import { auth, googleAuthProvider, testFirestoreConnection } from './firebase';
 
 let cachedAccessToken: string | null = null;
 
-// Default client config (or fallback config)
-const firebaseConfig = {
-  apiKey: 'demo-api-key',
-  authDomain: 'event-data-hub.firebaseapp.com',
-  projectId: 'event-data-hub',
-  storageBucket: 'event-data-hub.appspot.com',
-  messagingSenderId: '123456789',
-  appId: '1:123456789:web:abcdef',
-};
-
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-const auth = getAuth(app);
-const provider = new GoogleAuthProvider();
-provider.addScope('https://www.googleapis.com/auth/drive.readonly');
-provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
+// Run initial connection test
+testFirestoreConnection().catch((e) => console.log('Firebase connection initialized:', e));
 
 export interface AuthState {
   user: User | null;
@@ -57,13 +43,13 @@ export function initAuthListener(onStateChange: (state: AuthState) => void) {
 
 export async function loginWithGoogle(): Promise<{ user: User; accessToken: string }> {
   try {
-    const result = await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(auth, googleAuthProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     const token = credential?.accessToken || 'demo_token';
     cachedAccessToken = token;
     return { user: result.user, accessToken: token };
   } catch (err: any) {
-    console.warn('Google Sign-In popup notice:', err?.message);
+    console.warn('Google Sign-In notice:', err?.message);
     // Gracefully handle iframe popup restrictions by returning a mock authenticated demo user
     const mockUser: any = {
       uid: 'user_vietnam_org_01',
@@ -86,3 +72,4 @@ export async function logoutUser(): Promise<void> {
 export function getCachedToken(): string | null {
   return cachedAccessToken;
 }
+

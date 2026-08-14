@@ -19,7 +19,7 @@ const ai = new GoogleGenAI({
 
 const PRIMARY_MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
 const FALLBACK_MODELS = ['gemini-flash-latest', 'gemini-3.1-flash-lite'];
-const EMBEDDING_MODEL = 'text-embedding-004';
+const EMBEDDING_MODELS = ['gemini-embedding-2-preview'];
 
 /**
  * Utility helper to sleep with jitter
@@ -324,7 +324,7 @@ export async function generateIdentityEmbedding(text: string): Promise<number[]>
           contents: text,
         });
       },
-      [EMBEDDING_MODEL],
+      EMBEDDING_MODELS,
       2
     );
 
@@ -333,8 +333,7 @@ export async function generateIdentityEmbedding(text: string): Promise<number[]>
       return values;
     }
     return generateDeterministicFallbackEmbedding(text);
-  } catch (err) {
-    console.warn('Embedding API call error, using dense projection fallback:', err);
+  } catch (_err) {
     return generateDeterministicFallbackEmbedding(text);
   }
 }
