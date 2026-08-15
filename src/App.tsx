@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { AlertTriangle, X } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { StatsPanel } from './components/StatsPanel';
@@ -54,6 +55,8 @@ export function App() {
 
   // Toast notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Persistent fallback embedding count warning state
+  const [fallbackEmbeddingCount, setFallbackEmbeddingCount] = useState<number>(0);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -132,6 +135,7 @@ export function App() {
     loadStatsAndMerges();
     loadEntities();
     if (summary.fallbackEmbeddingCount && summary.fallbackEmbeddingCount > 0) {
+      setFallbackEmbeddingCount(summary.fallbackEmbeddingCount);
       showToast(`Cảnh báo: ${summary.fallbackEmbeddingCount} bản ghi dùng vector dự phòng do dịch vụ embedding không khả dụng. Chất lượng phân giải thực thể bị giảm.`);
     } else if (summary.pendingMergeSuggestionsCount > 0) {
       setIsMergeModalOpen(true);
@@ -187,6 +191,27 @@ export function App() {
 
         {/* Content Area */}
         <main className="flex-1 p-6 overflow-y-auto">
+          {/* Persistent Fallback Embedding Warning Banner */}
+          {fallbackEmbeddingCount > 0 && (
+            <div className="mb-6 p-3.5 bg-[#FFFBEB] border border-[#FDE68A] rounded-xl flex items-center justify-between space-x-3 text-[#92400E]">
+              <div className="flex items-center space-x-3">
+                <AlertTriangle className="w-5 h-5 shrink-0 text-[#D97706]" />
+                <div className="text-xs">
+                  <span className="font-bold">Cảnh báo chất lượng Vector Embedding:</span> Có {fallbackEmbeddingCount} bản ghi đã sử dụng vector dự phòng do dịch vụ embedding không khả dụng. Chất lượng phân giải thực thể và độ chính xác khi ghép nối có thể bị giảm.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFallbackEmbeddingCount(0)}
+                className="text-[#92400E] hover:text-[#78350F] p-1 rounded-lg hover:bg-[#FEF3C7] transition-colors shrink-0 cursor-pointer"
+                title="Đóng thông báo"
+                aria-label="Đóng thông báo"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {/* Top Metric Cards */}
           <StatsPanel stats={stats} />
 

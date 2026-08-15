@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 import { apiRouter } from './server/routes/api.js';
 import { db } from './server/db/index.js';
 import { seedInitialEventData } from './server/db/seedData.js';
@@ -10,7 +9,7 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.NODE_ENV === 'production' ? (Number(process.env.PORT) || 8080) : 3000;
 
   // JSON and URL-encoded body parsers (with 50mb limit for spreadsheet buffers)
   app.use(express.json({ limit: '50mb' }));
@@ -51,6 +50,7 @@ async function startServer() {
 
   // Vite middleware for development vs static serve for production
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
