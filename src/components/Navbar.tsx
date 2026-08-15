@@ -1,6 +1,6 @@
-import React from 'react';
-import { Database, Plus, RefreshCw, Sparkles, CheckCircle2, User as UserIcon, LogOut, FileSpreadsheet } from 'lucide-react';
-import { AuthState, loginWithGoogle, logoutUser } from '../services/auth';
+import React, { useState } from 'react';
+import { Database, Plus, RefreshCw, Sparkles, CheckCircle2, User as UserIcon, LogOut, FileSpreadsheet, AlertTriangle, X } from 'lucide-react';
+import { AuthState, loginWithGoogle, logoutUser, FirebaseAuthError } from '../services/auth';
 
 interface NavbarProps {
   authState: AuthState;
@@ -19,8 +19,41 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSeedData,
   isSeeding,
 }) => {
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const handleLogin = async () => {
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      if (err instanceof FirebaseAuthError) {
+        setAuthError(err.message);
+      } else {
+        setAuthError(err?.message || 'Đăng nhập không thành công.');
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+      {authError && (
+        <div className="bg-[#FEF2F2] border-b border-[#FCA5A5] px-4 py-2 text-xs font-bold text-[#991B1B] flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 text-[#DC2626] shrink-0" />
+            <span>{authError}</span>
+          </div>
+          <button
+            onClick={() => setAuthError(null)}
+            className="text-[#991B1B] hover:text-[#7F1D1D] p-1"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand & Identity */}
         <div className="flex items-center space-x-3">
@@ -106,8 +139,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             ) : (
               <button
-                onClick={loginWithGoogle}
-                className="inline-flex items-center px-3 py-2 text-xs font-bold rounded-lg border border-[#D1D5DB] text-[#374151] bg-white hover:bg-[#F9FAFB] transition-colors uppercase tracking-wider"
+                onClick={handleLogin}
+                disabled={isLoggingIn}
+                className="inline-flex items-center px-3 py-2 text-xs font-bold rounded-lg border border-[#D1D5DB] text-[#374151] bg-white hover:bg-[#F9FAFB] transition-colors uppercase tracking-wider disabled:opacity-50"
               >
                 <svg className="w-3.5 h-3.5 mr-1.5" viewBox="0 0 24 24">
                   <path
@@ -127,7 +161,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.25 2.64 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
                   />
                 </svg>
-                <span>Đăng nhập</span>
+                <span>{isLoggingIn ? 'Đang xác thực...' : 'Đăng nhập'}</span>
               </button>
             )}
           </div>

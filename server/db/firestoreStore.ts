@@ -14,12 +14,29 @@ import {
 import { DataStore } from './types.js';
 import { adminDb, FieldValue } from '../firebaseAdmin.js';
 
+/**
+ * Firestore returns embeddings as VectorValue, not number[]. Every read path must
+ * convert back or `Array.isArray(x.embedding)` is false everywhere downstream and
+ * candidate retrieval silently yields nothing. Centralized here so no read site
+ * can forget it.
+ */
+function fromDoc<T>(
+  snap: FirebaseFirestore.DocumentSnapshot | FirebaseFirestore.QueryDocumentSnapshot
+): T {
+  const data = snap.data() as any;
+  if (data && data.embedding && typeof data.embedding.toArray === 'function') {
+    data.embedding = data.embedding.toArray();
+  }
+  return data as T;
+}
+
 export class FirestoreDataStore implements DataStore {
   private rawRecordsCol = adminDb.collection('rawRecords');
   private canonicalEntitiesCol = adminDb.collection('canonicalEntities');
   private entityLinksCol = adminDb.collection('entityLinks');
   private pendingSuggestionsCol = adminDb.collection('pendingSuggestions');
   private rejectionsCol = adminDb.collection('rejections');
+  private vectorSearchDegraded = false;
 
   public async clearAll(orgId: string): Promise<void> {
     const collections = [
@@ -55,11 +72,7 @@ export class FirestoreDataStore implements DataStore {
 
     const docData: any = { ...record };
     if (record.embedding && Array.isArray(record.embedding)) {
-      try {
-        docData.embedding = FieldValue.vector(record.embedding);
-      } catch (_e) {
-        docData.embedding = record.embedding;
-      }
+      docData.embedding = FieldValue.vector(record.embedding);
     }
 
     await this.rawRecordsCol.doc(record.id).set(docData);
@@ -69,14 +82,14 @@ export class FirestoreDataStore implements DataStore {
   public async getRawRecord(id: string): Promise<RawSourceRecord | undefined> {
     const snap = await this.rawRecordsCol.doc(id).get();
     if (!snap.exists) return undefined;
-    return snap.data() as RawSourceRecord;
+    return fromDoc<RawSourceRecord>(snap);
   }
 
   public async getAllRawRecords(orgId?: string): Promise<RawSourceRecord[]> {
     let q: FirebaseFirestore.Query = this.rawRecordsCol;
     if (orgId) q = q.where('orgId', '==', orgId);
     const snap = await q.get();
-    return snap.docs.map((d) => d.data() as RawSourceRecord);
+    return snap.docs.map((d) => fromDoc<RawSourceRecord>(d));
   }
 
   // --- Layer 2: Canonical Entities ---
@@ -111,11 +124,7 @@ export class FirestoreDataStore implements DataStore {
 
     const docData: any = { ...entity };
     if (entity.embedding && Array.isArray(entity.embedding)) {
-      try {
-        docData.embedding = FieldValue.vector(entity.embedding);
-      } catch (_e) {
-        docData.embedding = entity.embedding;
-      }
+      docData.embedding = FieldValue.vector(entity.embedding);
     }
 
     await this.canonicalEntitiesCol.doc(id).set(docData);
@@ -125,14 +134,14 @@ export class FirestoreDataStore implements DataStore {
   public async getCanonicalEntity(id: string): Promise<CanonicalEntity | undefined> {
     const snap = await this.canonicalEntitiesCol.doc(id).get();
     if (!snap.exists) return undefined;
-    return snap.data() as CanonicalEntity;
+    return fromDoc<CanonicalEntity>(snap);
   }
 
   public async getAllCanonicalEntities(orgId: string): Promise<CanonicalEntity[]> {
     let q: FirebaseFirestore.Query = this.canonicalEntitiesCol;
     if (orgId) q = q.where('orgId', '==', orgId);
     const snap = await q.get();
-    return snap.docs.map((d) => d.data() as CanonicalEntity);
+    return snap.docs.map((d) => fromDoc<CanonicalEntity>(d));
   }
 
   public async updateCanonicalEntity(
@@ -143,7 +152,7 @@ export class FirestoreDataStore implements DataStore {
     const docRef = this.canonicalEntitiesCol.doc(id);
     const existingSnap = await docRef.get();
     if (!existingSnap.exists) throw new Error(`Canonical entity not found: ${id}`);
-    const existing = existingSnap.data() as CanonicalEntity;
+    const existing = fromDoc<CanonicalEntity>(existingSnap);
 
     const updated: CanonicalEntity = {
       ...existing,
@@ -153,11 +162,7 @@ export class FirestoreDataStore implements DataStore {
 
     const docData: any = { ...updated };
     if (updated.embedding && Array.isArray(updated.embedding)) {
-      try {
-        docData.embedding = FieldValue.vector(updated.embedding);
-      } catch (_e) {
-        docData.embedding = updated.embedding;
-      }
+      docData.embedding = FieldValue.vector(updated.embedding);
     }
 
     await docRef.set(docData, { merge: true });
@@ -184,7 +189,7 @@ export class FirestoreDataStore implements DataStore {
     // Check if identityKey is stored on a raw record
     const rawSnap = await this.rawRecordsCol.doc(identityKeyOrRecordId).get();
     if (rawSnap.exists) {
-      const raw = rawSnap.data() as RawSourceRecord;
+      const raw = fromDoc<RawSourceRecord>(rawSnap);
       if (raw.identityKey) {
         const rawSafeKey = `${orgId}_${encodeURIComponent(raw.identityKey)}_${canonicalEntityId}`;
         const rawRejSnap = await this.rejectionsCol.doc(rawSafeKey).get();
@@ -199,7 +204,7 @@ export class FirestoreDataStore implements DataStore {
       .get();
 
     return linkQuery.docs.some((d) => {
-      const l = d.data() as EntityLink;
+      const l = fromDoc<EntityLink>(d);
       return l.rawRecordId === identityKeyOrRecordId;
     });
   }
@@ -243,19 +248,25 @@ export class FirestoreDataStore implements DataStore {
 
         const results: { entity: CanonicalEntity; similarity: number }[] = [];
         for (const doc of snap.docs) {
-          const entity = doc.data() as CanonicalEntity;
+          const entity = fromDoc<CanonicalEntity>(doc);
           const dist = doc.get('_distance') ?? 1;
           const similarity = Math.max(0, 1 - dist);
           if (similarity >= minSimilarity) {
             results.push({ entity, similarity });
           }
         }
-        if (results.length > 0) {
-          return results.slice(0, topN);
-        }
+        return results.slice(0, topN);
       }
-    } catch (_err) {
-      // Fall back to in-memory cosine computation over org records
+    } catch (err: any) {
+      // FAILED_PRECONDITION means the KNN index is missing — actionable, so name it explicitly.
+      const missingIndex = err?.code === 9 || /FAILED_PRECONDITION|requires an index/i.test(err?.message || '');
+      console.error(
+        missingIndex
+          ? '[Firestore] Vector index missing on canonicalEntities.embedding. Create it with the gcloud command in README.md. Falling back to in-memory scan (slow, does not scale).'
+          : '[Firestore] findNearest failed, falling back to in-memory scan:',
+        err
+      );
+      this.vectorSearchDegraded = true;
     }
 
     // In-memory fallback over canonical entities in org
@@ -274,7 +285,7 @@ export class FirestoreDataStore implements DataStore {
           .get();
 
         for (const linkDoc of linksSnap.docs) {
-          const l = linkDoc.data() as EntityLink;
+          const l = fromDoc<EntityLink>(linkDoc);
           const raw = await this.getRawRecord(l.rawRecordId);
           if (raw?.embedding && Array.isArray(raw.embedding)) {
             const sim = cosineSimilarity(queryEmbedding, raw.embedding);
@@ -303,7 +314,7 @@ export class FirestoreDataStore implements DataStore {
     let q: FirebaseFirestore.Query = this.pendingSuggestionsCol;
     if (orgId) q = q.where('rawRecord.orgId', '==', orgId);
     const snap = await q.get();
-    return snap.docs.map((d) => d.data() as MergeSuggestion);
+    return snap.docs.map((d) => fromDoc<MergeSuggestion>(d));
   }
 
   public async approveMerge(
@@ -317,7 +328,7 @@ export class FirestoreDataStore implements DataStore {
     let suggestion: MergeSuggestion | undefined;
     const suggSnap = await this.pendingSuggestionsCol.doc(suggestionId).get();
     if (suggSnap.exists) {
-      suggestion = suggSnap.data() as MergeSuggestion;
+      suggestion = fromDoc<MergeSuggestion>(suggSnap);
     }
 
     const raw = await this.getRawRecord(rawRecordId);
@@ -397,7 +408,7 @@ export class FirestoreDataStore implements DataStore {
     let suggestion: MergeSuggestion | undefined;
     const suggSnap = await this.pendingSuggestionsCol.doc(suggestionId).get();
     if (suggSnap.exists) {
-      suggestion = suggSnap.data() as MergeSuggestion;
+      suggestion = fromDoc<MergeSuggestion>(suggSnap);
     }
 
     const raw = await this.getRawRecord(rawRecordId);
@@ -505,6 +516,7 @@ export class FirestoreDataStore implements DataStore {
       totalSourceFiles: sourceFileIds.size,
       dedupRatio: Math.max(0, dedupRatio),
       sourcesBreakdown: breakdown,
+      vectorSearchDegraded: this.vectorSearchDegraded,
     };
   }
 
@@ -628,7 +640,7 @@ export class FirestoreDataStore implements DataStore {
       .get();
 
     const links = linksSnap.docs
-      .map((d) => d.data() as EntityLink)
+      .map((d) => fromDoc<EntityLink>(d))
       .filter((l) => l.status === 'approved');
 
     const rawRecordsDetails = await Promise.all(

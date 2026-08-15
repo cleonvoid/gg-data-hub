@@ -62,19 +62,26 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+export type FirestoreConnState = 'connected' | 'permission-denied' | 'offline' | 'misconfigured';
+
 /**
  * Tests connection to Firestore instance on boot
  */
-export async function testFirestoreConnection(): Promise<boolean> {
+export async function testFirestoreConnection(): Promise<{ state: FirestoreConnState; code?: string }> {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
-    return true;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firestore offline status check:', error.message);
-      return false;
+    return { state: 'connected' };
+  } catch (error: any) {
+    const code = error?.code || '';
+    if (code === 'permission-denied') {
+      return { state: 'permission-denied', code };
     }
-    // Any permission error still proves connectivity to Firestore server
-    return true;
+    if (code === 'unavailable' || (error instanceof Error && error.message.includes('the client is offline'))) {
+      return { state: 'offline', code };
+    }
+    if (code === 'failed-precondition' || code === 'not-found') {
+      return { state: 'misconfigured', code };
+    }
+    return { state: 'misconfigured', code: code || error?.message };
   }
 }

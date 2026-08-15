@@ -109,6 +109,7 @@ export interface IngestionStats {
     local_xlsx: number;
     seed: number;
   };
+  vectorSearchDegraded?: boolean;
 }
 
 export interface FilterParams {

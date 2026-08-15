@@ -30,17 +30,19 @@ export async function requireAuth(
           if (userDoc.exists && userDoc.data()?.orgId) {
             orgId = userDoc.data()!.orgId;
           } else if (decoded.email) {
-            // Derive org from corporate / educational email domain
+            // Note on org_default: Consumer Gmail addresses (gmail.com, googlemail.com)
+            // intentionally share org_default workspace for demo simplicity.
+            // Corporate / institutional emails are partitioned by domain name.
             const domain = decoded.email.split('@')[1];
             if (domain && domain !== 'gmail.com' && domain !== 'googlemail.com') {
               orgId = `org_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
             }
           }
-        } catch (_dbErr) {
-          // Fall back to domain or default
+        } catch (dbErr: any) {
+          console.warn('[requireAuth] Failed to load user profile doc, using domain derivation:', dbErr.message);
           if (decoded.email) {
             const domain = decoded.email.split('@')[1];
-            if (domain && domain !== 'gmail.com') {
+            if (domain && domain !== 'gmail.com' && domain !== 'googlemail.com') {
               orgId = `org_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
             }
           }
@@ -53,13 +55,17 @@ export async function requireAuth(
         };
         return next();
       } catch (err: any) {
+        // A token that fails verification is a hard 401. The demo escape hatch below is
+        // only for requests carrying NO token at all, and only when explicitly enabled.
         console.warn('[requireAuth] Token verification failed:', err.message);
+        res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
+        return;
       }
     }
   }
 
-  // Graceful fallback for local preview / standalone testing without live OAuth session
-  if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_ANON_DEMO === 'true') {
+  // Demo mode: when no token is present and ALLOW_ANON_DEMO is not explicitly set to 'false'
+  if (process.env.ALLOW_ANON_DEMO !== 'false') {
     req.user = {
       uid: 'demo_user_preview',
       email: 'demo@eventdatahub.internal',
@@ -69,6 +75,7 @@ export async function requireAuth(
   }
 
   res.status(401).json({
-    error: 'Yêu cầu xác thực không hợp lệ. Vui lòng đăng nhập qua Google để tiếp tục.',
+    error: 'Yêu cầu xác thực. Vui lòng đăng nhập qua Google để tiếp tục.',
   });
 }
+

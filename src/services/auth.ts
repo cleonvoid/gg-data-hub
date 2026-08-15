@@ -9,14 +9,40 @@ import { auth, googleAuthProvider, testFirestoreConnection } from './firebase';
 
 let cachedAccessToken: string | null = null;
 
-// Run initial connection test
-testFirestoreConnection().catch((e) => console.log('Firebase connection initialized:', e));
+// Run initial connection test and log diagnostic state
+testFirestoreConnection()
+  .then((res) => console.log('[Firebase] Connection check state:', res.state))
+  .catch((e) => console.error('[Firebase] Firestore connection check failed:', e));
 
 export interface AuthState {
   user: User | null;
   accessToken: string | null;
   isAuthenticated: boolean;
   isGuestDemo: boolean;
+}
+
+export class FirebaseAuthError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'FirebaseAuthError';
+    this.code = code;
+  }
+}
+
+export function getVietnameseAuthErrorMessage(code: string): string {
+  switch (code) {
+    case 'auth/popup-blocked':
+      return 'Trình duyệt đã chặn cửa sổ đăng nhập. Vui lòng cho phép popup và thử lại.';
+    case 'auth/unauthorized-domain':
+      return 'Tên miền này chưa được cấp phép trong Firebase Console.';
+    case 'auth/popup-closed-by-user':
+      return 'Bạn đã đóng cửa sổ đăng nhập trước khi hoàn tất.';
+    case 'auth/network-request-failed':
+      return 'Không thể kết nối tới máy chủ xác thực. Kiểm tra kết nối mạng.';
+    default:
+      return `Đăng nhập không thành công (${code}).`;
+  }
 }
 
 export function initAuthListener(onStateChange: (state: AuthState) => void) {
@@ -49,18 +75,23 @@ export async function loginWithGoogle(): Promise<{ user: User; accessToken: stri
     cachedAccessToken = accessToken;
     return { user: result.user, accessToken, idToken };
   } catch (err: any) {
-    console.error('Google Sign-In Error:', err);
-    throw err;
+    const code = err?.code || 'auth/unknown';
+    const message = getVietnameseAuthErrorMessage(code);
+    console.error('[Auth] Google Sign-In Error:', code, err?.message || err);
+    throw new FirebaseAuthError(code, message);
   }
 }
 
 export async function logoutUser(): Promise<void> {
   try {
     await signOut(auth);
-  } catch (e) {}
+  } catch (e: any) {
+    console.warn('[Auth] Logout warning:', e?.message || e);
+  }
   cachedAccessToken = null;
 }
 
 export function getCachedToken(): string | null {
   return cachedAccessToken;
 }
+

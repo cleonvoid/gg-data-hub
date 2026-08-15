@@ -2,66 +2,75 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128;
-    }
-
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function incoming() {
-      return request.resource.data;
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 1500;
     }
 
-    function existing() {
-      return resource.data;
+    // Resolves the caller's org from their profile doc. Costs one document read
+    // per rule evaluation — acceptable here because it is the only way to scope
+    // without custom claims, and the server (Admin SDK) bypasses rules entirely.
+    function callerOrg() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.orgId;
     }
 
-    // Canonical Entities Collection
-    match /canonicalEntities/{entityId} {
-      allow get, list: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidId(entityId);
-      allow delete: if isSignedIn();
+    function readableInOwnOrg() {
+      return isSignedIn() && resource.data.orgId == callerOrg();
     }
 
-    // Raw Source Records Collection (Immutable attendee rows)
+    function creatingInOwnOrg() {
+      return isSignedIn() && request.resource.data.orgId == callerOrg();
+    }
+
+    // Layer 1 — raw source records. IMMUTABLE BY DESIGN: the brief requires raw
+    // data is never overwritten or discarded. Only the Admin SDK may mutate these.
     match /rawRecords/{rawRecordId} {
-      allow get, list: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidId(rawRecordId);
-      allow delete: if isSignedIn();
+      allow get, list: if readableInOwnOrg();
+      allow create: if creatingInOwnOrg() && isValidId(rawRecordId)
+                    && request.resource.data.sourceFileId is string;
+      allow update, delete: if false;
     }
 
-    // Entity Links Collection
-    match /entityLinks/{linkId} {
-      allow get, list: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidId(linkId);
-      allow delete: if isSignedIn();
-    }
-
-    // Pending Suggestions Collection
-    match /pendingSuggestions/{suggestionId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if isSignedIn() && isValidId(suggestionId);
-    }
-
-    // Rejections Collection
-    match /rejections/{rejectionId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if isSignedIn() && isValidId(rejectionId);
-    }
-
-    // User Profile Documents
-    match /users/{userId} {
-      allow get: if isSignedIn();
-      allow create, update: if isSignedIn() && request.auth.uid == userId;
+    // Layer 2 — canonical entities (derived view over layer 1).
+    match /canonicalEntities/{entityId} {
+      allow get, list: if readableInOwnOrg();
+      allow create: if creatingInOwnOrg() && isValidId(entityId)
+                    && request.resource.data.canonicalName is string
+                    && request.resource.data.canonicalName.size() <= 200;
+      allow update: if readableInOwnOrg() && creatingInOwnOrg()
+                    && request.resource.data.canonicalName is string
+                    && request.resource.data.canonicalName.size() <= 200;
       allow delete: if false;
     }
 
-    // Default-deny catch-all
-    match /{document=**} {
-      allow read, write: if false;
+    // Layer 3 — the merge/link audit trail. Append-only: rewriting why a merge
+    // happened would destroy the provenance record the whole design rests on.
+    match /entityLinks/{linkId} {
+      allow get, list: if readableInOwnOrg();
+      allow create: if creatingInOwnOrg() && isValidId(linkId);
+      allow update, delete: if false;
+    }
+
+    match /pendingSuggestions/{suggestionId} {
+      allow get, list: if readableInOwnOrg();
+      allow create: if creatingInOwnOrg() && isValidId(suggestionId);
+      allow update, delete: if readableInOwnOrg();
+    }
+
+    match /rejections/{rejectionId} {
+      allow get, list: if readableInOwnOrg();
+      allow create: if creatingInOwnOrg() && isValidId(rejectionId);
+      allow update, delete: if false;
+    }
+
+    // Written exclusively by the server via the Admin SDK, which bypasses rules.
+    // A client that could write its own orgId would defeat all scoping above.
+    match /users/{userId} {
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow list, create, update, delete: if false;
     }
   }
 }

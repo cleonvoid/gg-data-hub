@@ -3,185 +3,149 @@ import { JsonDataStore } from './jsonStore.js';
 import { FirestoreDataStore } from './firestoreStore.js';
 
 class ResilientDataStore implements DataStore {
+  private firestoreStore: FirestoreDataStore;
   private jsonStore: JsonDataStore;
-  private firestoreStore: FirestoreDataStore | null = null;
-  private firestoreDisabled = false;
+  private useFallback: boolean = false;
+  private hasWarned: boolean = false;
 
   constructor() {
+    this.firestoreStore = new FirestoreDataStore();
     this.jsonStore = new JsonDataStore();
-    if (process.env.DATA_STORE === 'firestore') {
-      try {
-        this.firestoreStore = new FirestoreDataStore();
-      } catch (err: any) {
-        console.warn('[Database] Firestore initialization error, defaulting to JsonDataStore:', err.message);
-        this.firestoreDisabled = true;
+  }
+
+  private isFirestoreError(err: any): boolean {
+    if (!err) return false;
+    const msg = String(err?.message || err);
+    return (
+      err?.code === 7 ||
+      err?.code === 14 ||
+      err?.code === 'unavailable' ||
+      err?.code === 'permission-denied' ||
+      /PERMISSION_DENIED|UNAVAILABLE|permission denied|insufficient permissions|offline/i.test(msg)
+    );
+  }
+
+  private async execute<T>(fnName: string, op: (store: DataStore) => Promise<T>): Promise<T> {
+    if (this.useFallback) {
+      return op(this.jsonStore);
+    }
+    try {
+      return await op(this.firestoreStore);
+    } catch (err: any) {
+      if (this.isFirestoreError(err)) {
+        if (!this.hasWarned) {
+          console.warn(
+            `[Database] Firestore Admin credentials not available in environment (${err?.message || err?.code}). Seamlessly switching to persistent JsonDataStore.`
+          );
+          this.hasWarned = true;
+        }
+        this.useFallback = true;
+        return op(this.jsonStore);
       }
-    } else {
-      this.firestoreDisabled = true;
+      throw err;
     }
   }
 
-  private handleFirestoreError(err: any): void {
-    if (!this.firestoreDisabled) {
-      console.warn(
-        '[Database] Firestore access error (e.g. Missing service account permissions or offline). Seamlessly falling back to JsonDataStore:',
-        err?.message || err
-      );
-      this.firestoreDisabled = true;
-    }
+  async getAllCanonicalEntities(orgId: string) {
+    return this.execute('getAllCanonicalEntities', (s) => s.getAllCanonicalEntities(orgId));
   }
 
-  private async execute<T>(
-    firestoreFn: (store: FirestoreDataStore) => Promise<T>,
-    jsonFn: (store: JsonDataStore) => Promise<T>
-  ): Promise<T> {
-    if (!this.firestoreDisabled && this.firestoreStore) {
-      try {
-        return await firestoreFn(this.firestoreStore);
-      } catch (err: any) {
-        this.handleFirestoreError(err);
-        return await jsonFn(this.jsonStore);
-      }
-    }
-    return await jsonFn(this.jsonStore);
+  async getStats(orgId: string) {
+    return this.execute('getStats', (s) => s.getStats(orgId));
   }
 
-  public async getAllCanonicalEntities(orgId: string) {
-    return this.execute(
-      (s) => s.getAllCanonicalEntities(orgId),
-      (s) => s.getAllCanonicalEntities(orgId)
-    );
+  async queryEntities(orgId: string, params: any) {
+    return this.execute('queryEntities', (s) => s.queryEntities(orgId, params));
   }
 
-  public async getStats(orgId: string) {
-    return this.execute(
-      (s) => s.getStats(orgId),
-      (s) => s.getStats(orgId)
-    );
+  async getEntityDetails(orgId: string, canonicalId: string) {
+    return this.execute('getEntityDetails', (s) => s.getEntityDetails(orgId, canonicalId));
   }
 
-  public async queryEntities(orgId: string, params: any) {
-    return this.execute(
-      (s) => s.queryEntities(orgId, params),
-      (s) => s.queryEntities(orgId, params)
-    );
+  async addRawRecord(raw: any) {
+    return this.execute('addRawRecord', (s) => s.addRawRecord(raw));
   }
 
-  public async getEntityDetails(orgId: string, canonicalId: string) {
-    return this.execute(
-      (s) => s.getEntityDetails(orgId, canonicalId),
-      (s) => s.getEntityDetails(orgId, canonicalId)
-    );
+  async createCanonicalEntity(orgId: string, payload: any) {
+    return this.execute('createCanonicalEntity', (s) => s.createCanonicalEntity(orgId, payload));
   }
 
-  public async addRawRecord(raw: any) {
-    return this.execute(
-      (s) => s.addRawRecord(raw),
-      (s) => s.addRawRecord(raw)
-    );
+  async updateCanonicalEntity(orgId: string, id: string, payload: any) {
+    return this.execute('updateCanonicalEntity', (s) => s.updateCanonicalEntity(orgId, id, payload));
   }
 
-  public async createCanonicalEntity(orgId: string, payload: any) {
-    return this.execute(
-      (s) => s.createCanonicalEntity(orgId, payload),
-      (s) => s.createCanonicalEntity(orgId, payload)
-    );
+  async addEntityLink(link: any) {
+    return this.execute('addEntityLink', (s) => s.addEntityLink(link));
   }
 
-  public async updateCanonicalEntity(orgId: string, id: string, payload: any) {
-    return this.execute(
-      (s) => s.updateCanonicalEntity(orgId, id, payload),
-      (s) => s.updateCanonicalEntity(orgId, id, payload)
-    );
+  async addPendingSuggestion(suggestion: any) {
+    return this.execute('addPendingSuggestion', (s) => s.addPendingSuggestion(suggestion));
   }
 
-  public async addEntityLink(link: any) {
-    return this.execute(
-      (s) => s.addEntityLink(link),
-      (s) => s.addEntityLink(link)
-    );
+  async getPendingSuggestions(orgId: string) {
+    return this.execute('getPendingSuggestions', (s) => s.getPendingSuggestions(orgId));
   }
 
-  public async addPendingSuggestion(suggestion: any) {
-    return this.execute(
-      (s) => s.addPendingSuggestion(suggestion),
-      (s) => s.addPendingSuggestion(suggestion)
-    );
-  }
-
-  public async getPendingSuggestions(orgId: string) {
-    return this.execute(
-      (s) => s.getPendingSuggestions(orgId),
-      (s) => s.getPendingSuggestions(orgId)
-    );
-  }
-
-  public async approveMerge(
+  async approveMerge(
     orgId: string,
     suggestionId: string,
     rawRecordId: string,
     canonicalEntityId: string,
     decidedBy?: 'user' | 'system_initial' | 'auto_merge'
   ) {
-    return this.execute(
-      (s) => s.approveMerge(orgId, suggestionId, rawRecordId, canonicalEntityId, decidedBy),
-      (s) => s.approveMerge(orgId, suggestionId, rawRecordId, canonicalEntityId, decidedBy)
+    return this.execute('approveMerge', (s) =>
+      s.approveMerge(orgId, suggestionId, rawRecordId, canonicalEntityId, decidedBy)
     );
   }
 
-  public async rejectMerge(
+  async rejectMerge(
     orgId: string,
     suggestionId: string,
     rawRecordId: string,
     canonicalEntityId: string,
     reason?: string
   ) {
-    return this.execute(
-      (s) => s.rejectMerge(orgId, suggestionId, rawRecordId, canonicalEntityId, reason),
-      (s) => s.rejectMerge(orgId, suggestionId, rawRecordId, canonicalEntityId, reason)
+    return this.execute('rejectMerge', (s) =>
+      s.rejectMerge(orgId, suggestionId, rawRecordId, canonicalEntityId, reason)
     );
   }
 
-  public async findTopCandidatesByVector(
+  async findTopCandidatesByVector(
     orgId: string,
     queryEmbedding: number[],
     topN?: number,
     minSimilarity?: number
   ) {
-    return this.execute(
-      (s) => s.findTopCandidatesByVector(orgId, queryEmbedding, topN, minSimilarity),
-      (s) => s.findTopCandidatesByVector(orgId, queryEmbedding, topN, minSimilarity)
+    return this.execute('findTopCandidatesByVector', (s) =>
+      s.findTopCandidatesByVector(orgId, queryEmbedding, topN, minSimilarity)
     );
   }
 
-  public async isPairRejected(orgId: string, identityKeyOrRecordId: string, canonicalEntityId: string) {
-    return this.execute(
-      (s) => s.isPairRejected(orgId, identityKeyOrRecordId, canonicalEntityId),
-      (s) => s.isPairRejected(orgId, identityKeyOrRecordId, canonicalEntityId)
+  async isPairRejected(orgId: string, identityKeyOrRecordId: string, canonicalEntityId: string) {
+    return this.execute('isPairRejected', (s) =>
+      s.isPairRejected(orgId, identityKeyOrRecordId, canonicalEntityId)
     );
   }
 
-  public async recordRejection(orgId: string, identityKey: string, canonicalEntityId: string) {
-    return this.execute(
-      (s) => s.recordRejection(orgId, identityKey, canonicalEntityId),
-      (s) => s.recordRejection(orgId, identityKey, canonicalEntityId)
+  async recordRejection(orgId: string, identityKey: string, canonicalEntityId: string) {
+    return this.execute('recordRejection', (s) =>
+      s.recordRejection(orgId, identityKey, canonicalEntityId)
     );
   }
 
-  public async clearAll(orgId: string) {
-    return this.execute(
-      (s) => s.clearAll(orgId),
-      (s) => s.clearAll(orgId)
-    );
+  async clearAll(orgId: string) {
+    return this.execute('clearAll', (s) => s.clearAll(orgId));
   }
 }
 
-export const db: DataStore = new ResilientDataStore();
+function createStore(): DataStore {
+  const driver = process.env.DATA_STORE === 'firestore' ? 'firestore' : 'json';
+  console.log(`[Database] Driver configured: ${driver}`);
+  if (driver === 'firestore') {
+    return new ResilientDataStore();
+  }
+  return new JsonDataStore();
+}
 
-console.log(
-  `[Database] Initialized ResilientDataStore (Mode: ${
-    process.env.DATA_STORE === 'firestore' ? 'Firestore with JSON fallback' : 'JSON persistence'
-  })`
-);
-
-export * from './types.js';
+export const db: DataStore = createStore();
+export type { DataStore } from './types.js';

@@ -23,6 +23,25 @@ import { requireAuth, AuthenticatedRequest } from '../middleware/requireAuth.js'
 
 export const apiRouter = Router();
 
+// Helper to handle and classify API / Database errors
+function handleRouteError(res: Response, err: any, defaultMsg: string = 'Đã xảy ra lỗi khi xử lý yêu cầu') {
+  console.error('[API Route Error]', err);
+  const errMsg = err?.message || '';
+  const isDbUnavailable =
+    err?.code === 14 ||
+    err?.code === 7 ||
+    err?.code === 'unavailable' ||
+    /UNAVAILABLE|permission denied|missing or insufficient permissions|database unavailable/i.test(errMsg);
+
+  if (isDbUnavailable) {
+    return res.status(503).json({
+      error: 'Cơ sở dữ liệu Firestore hiện không thể kết nối hoặc thiếu quyền truy cập. Vui lòng kiểm tra cấu hình.',
+      detail: errMsg,
+    });
+  }
+  return res.status(500).json({ error: errMsg || defaultMsg });
+}
+
 // Apply authentication middleware to all API routes
 apiRouter.use(requireAuth);
 
@@ -35,7 +54,7 @@ apiRouter.get('/stats', async (req: AuthenticatedRequest, res: Response) => {
     const stats = await db.getStats(orgId);
     res.json(stats);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Không thể tải thống kê');
   }
 });
 
@@ -72,7 +91,7 @@ apiRouter.get('/entities', async (req: AuthenticatedRequest, res: Response) => {
 
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Không thể truy vấn danh sách thực thể');
   }
 });
 
@@ -88,7 +107,7 @@ apiRouter.get('/entities/:id', async (req: AuthenticatedRequest, res: Response) 
     }
     res.json(details);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Không thể tải chi tiết thực thể');
   }
 });
 
@@ -308,8 +327,7 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
       suggestions: newSuggestions,
     });
   } catch (err: any) {
-    console.error('Ingest error:', err);
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Lỗi trong quá trình nạp và phân tích dữ liệu');
   }
 });
 
@@ -322,7 +340,7 @@ apiRouter.get('/merges/pending', async (req: AuthenticatedRequest, res: Response
     const suggestions = await db.getPendingSuggestions(orgId);
     res.json(suggestions);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Không thể tải danh sách gợi ý gộp');
   }
 });
 
@@ -348,7 +366,7 @@ apiRouter.post('/merges/adjudicate', async (req: AuthenticatedRequest, res: Resp
       return res.status(400).json({ error: 'Hành động không hợp lệ' });
     }
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Không thể thực hiện phê duyệt');
   }
 });
 
@@ -365,7 +383,7 @@ apiRouter.post('/search/translate', async (req: AuthenticatedRequest, res: Respo
     const translated = await translateNaturalLanguageQuery(query);
     res.json(translated);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Không thể dịch truy vấn tự nhiên');
   }
 });
 
@@ -379,7 +397,7 @@ apiRouter.get('/drive/files', async (req: AuthenticatedRequest, res: Response) =
     const files = await listDriveSpreadsheets(token);
     res.json(files);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Không thể duyệt tệp Google Drive');
   }
 });
 
@@ -399,7 +417,7 @@ apiRouter.post('/drive/fetch', async (req: AuthenticatedRequest, res: Response) 
     const sheetData = await fetchGoogleSheetRows(fileId, token);
     res.json(sheetData);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Không thể đọc dữ liệu Google Sheets');
   }
 });
 
@@ -417,7 +435,7 @@ apiRouter.post('/upload/parse', (req: AuthenticatedRequest, res: Response) => {
     const parsed = parseLocalSpreadsheetBuffer(buffer);
     res.json(parsed);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Không thể phân tích tệp Excel tải lên');
   }
 });
 
@@ -431,6 +449,6 @@ apiRouter.post('/seed', async (req: AuthenticatedRequest, res: Response) => {
     const stats = await db.getStats(orgId);
     res.json({ success: true, message: 'Đã nạp dữ liệu mẫu thành công', stats });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    handleRouteError(res, err, 'Không thể nạp dữ liệu mẫu');
   }
 });
