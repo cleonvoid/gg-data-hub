@@ -26,7 +26,7 @@ steps:
       - '--region=asia-southeast1'
       - '--platform=managed'
       - '--allow-unauthenticated'
-      - '--set-env-vars=DATA_STORE=firestore,NODE_ENV=production'
+      - '--set-env-vars=DATA_STORE=firestore,NODE_ENV=production,ALLOW_ANON_DEMO=false'
 
 images:
   - 'gcr.io/$PROJECT_ID/event-data-hub:$COMMIT_SHA'

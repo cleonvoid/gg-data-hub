@@ -10,7 +10,7 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = 3000;
 
   // JSON and URL-encoded body parsers (with 50mb limit for spreadsheet buffers)
   app.use(express.json({ limit: '50mb' }));
@@ -29,15 +29,24 @@ async function startServer() {
   // API Routes
   app.use('/api', apiRouter);
 
-  // Seed demo data if database is empty on launch
+  // Boot-time reachability check. Starting up pointed at an unreachable database is
+  // worse than not starting: the failure would only surface later as empty results.
   try {
     const existingEntities = await db.getAllCanonicalEntities('org_default');
     if (existingEntities.length === 0) {
       console.log('Database is empty on start. Populating initial seed data...');
       await seedInitialEventData('org_default');
     }
-  } catch (e) {
-    console.warn('Initial seeding check notice:', e);
+  } catch (e: any) {
+    if (process.env.DATA_STORE === 'firestore') {
+      console.error(
+        '[Startup] Firestore is unreachable. Grant the Cloud Run service account ' +
+          'roles/datastore.user and confirm FIREBASE_PROJECT_ID / FIRESTORE_DATABASE_ID.',
+        e
+      );
+      process.exit(1);
+    }
+    console.warn('[Startup] Seeding check failed on the JSON driver:', e);
   }
 
   // Vite middleware for development vs static serve for production

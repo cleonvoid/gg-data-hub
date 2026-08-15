@@ -64,8 +64,14 @@ export async function requireAuth(
     }
   }
 
-  // Demo mode: when no token is present and ALLOW_ANON_DEMO is not explicitly set to 'false'
-  if (process.env.ALLOW_ANON_DEMO !== 'false') {
+  // No token present. The demo escape hatch is opt-in only: an unset or malformed
+  // value must never grant access, because this service is deployed with
+  // --allow-unauthenticated and org scoping keys entirely off req.user.orgId.
+  if (process.env.ALLOW_ANON_DEMO === 'true') {
+    // Logged on every request, not once — it must be impossible to leave this on by accident.
+    console.warn(
+      '[requireAuth] ALLOW_ANON_DEMO=true — request served WITHOUT authentication as org_default.'
+    );
     req.user = {
       uid: 'demo_user_preview',
       email: 'demo@eventdatahub.internal',
