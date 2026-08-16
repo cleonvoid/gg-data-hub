@@ -38,33 +38,14 @@ async function startServer() {
     }
   } catch (e: any) {
     if (process.env.DATA_STORE === 'firestore') {
-      if (process.env.NODE_ENV === 'production') {
-        console.error(
-          '[Startup] Firestore is unreachable. Grant the Cloud Run service account ' +
-            'roles/datastore.user and confirm FIREBASE_PROJECT_ID / FIRESTORE_DATABASE_ID.',
-          e
-        );
-        process.exit(1);
-      } else {
-        console.warn(
-          '[Startup] Firestore is unreachable in local dev preview (missing GCP credentials). Falling back to JSON data store:',
-          e?.message || e
-        );
-        const { JsonDataStore } = await import('./server/db/jsonStore.js');
-        const { setStore } = await import('./server/db/index.js');
-        setStore(new JsonDataStore());
-        try {
-          const entities = await db.getAllCanonicalEntities('org_default');
-          if (entities.length === 0) {
-            await seedInitialEventData('org_default');
-          }
-        } catch (seedErr) {
-          console.warn('[Startup] Fallback seed check failed on JSON driver:', seedErr);
-        }
-      }
-    } else {
-      console.warn('[Startup] Seeding check failed on the JSON driver:', e);
+      console.error(
+        '[Startup] Firestore is unreachable. Grant the Cloud Run service account ' +
+          'roles/datastore.user and confirm FIREBASE_PROJECT_ID / FIRESTORE_DATABASE_ID.',
+        e
+      );
+      process.exit(1);
     }
+    console.warn('[Startup] Seeding check failed on the JSON driver:', e);
   }
 
   // Vite middleware for development vs static serve for production
