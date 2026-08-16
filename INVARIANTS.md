@@ -18,7 +18,12 @@ restart, so the data loss is silent.
 
 `"dev"` must stay `tsx server.ts`. An inline `DATA_STORE=json` overrides `.env`
 and the command line, which makes the Firestore driver untestable locally and
-hides the startup check. Defaults belong in code, not in the script.
+hides the startup check.
+
+This rule applies to npm scripts only. It is NOT a reason to remove
+`process.env` reads from application code. Application code should read
+environment variables and supply a fallback, as in
+`Number(process.env.PORT) || 3000`.
 
 ## 3. Never widen an authentication default
 
@@ -36,3 +41,10 @@ error is always better than invisible wrong data.
 
 A bare `NAME=` line is read as a required-but-unset secret and blocks the build
 with a prompt. Document optional variables as comments only.
+
+## 6. The server must bind the injected PORT
+
+`server.ts` must read `Number(process.env.PORT) || 3000`. Cloud Run injects
+`PORT` and terminates containers that do not bind it, so hardcoding the port
+breaks deployment. The literal 3000 is a local default only, never the bound
+value in production.

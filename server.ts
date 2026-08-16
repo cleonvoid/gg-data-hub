@@ -9,7 +9,9 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Cloud Run injects PORT and terminates containers that do not bind it.
+  // 3000 is only the local default.
+  const PORT = Number(process.env.PORT) || 3000;
 
   // JSON and URL-encoded body parsers (with 50mb limit for spreadsheet buffers)
   app.use(express.json({ limit: '50mb' }));
