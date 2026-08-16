@@ -305,6 +305,20 @@ export class FirestoreDataStore implements DataStore {
 
   // --- Merge Management & Adjudication ---
 
+  /**
+   * Merge endpoints take document IDs straight from the request body, so every
+   * resolved document must be re-checked against the caller's org before any write.
+   * Without this a caller can merge into another tenant's canonical entity.
+   */
+  private assertInOrg(orgId: string, doc: { orgId?: string } | undefined, label: string): void {
+    if (!doc) {
+      throw new Error(`${label} không tồn tại`);
+    }
+    if (orgId && doc.orgId !== orgId) {
+      throw new Error(`${label} không thuộc tổ chức của bạn`);
+    }
+  }
+
   public async addPendingSuggestion(suggestion: MergeSuggestion): Promise<MergeSuggestion> {
     await this.pendingSuggestionsCol.doc(suggestion.id).set(suggestion);
     return suggestion;
@@ -330,13 +344,15 @@ export class FirestoreDataStore implements DataStore {
     if (suggSnap.exists) {
       suggestion = fromDoc<MergeSuggestion>(suggSnap);
     }
+    if (suggestion) {
+      this.assertInOrg(orgId, suggestion.rawRecord, 'Gợi ý gộp');
+    }
 
     const raw = await this.getRawRecord(rawRecordId);
     const canonical = await this.getCanonicalEntity(canonicalEntityId);
 
-    if (!raw || !canonical) {
-      throw new Error('Raw record or canonical entity not found');
-    }
+    this.assertInOrg(orgId, raw, 'Bản ghi nguồn');
+    this.assertInOrg(orgId, canonical, 'Thực thể chuẩn hóa');
 
     // 1. Create link record with real audit data
     const linkId = `link_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -410,8 +426,15 @@ export class FirestoreDataStore implements DataStore {
     if (suggSnap.exists) {
       suggestion = fromDoc<MergeSuggestion>(suggSnap);
     }
+    if (suggestion) {
+      this.assertInOrg(orgId, suggestion.rawRecord, 'Gợi ý gộp');
+    }
 
     const raw = await this.getRawRecord(rawRecordId);
+    const canonical = await this.getCanonicalEntity(canonicalEntityId);
+
+    this.assertInOrg(orgId, raw, 'Bản ghi nguồn');
+    this.assertInOrg(orgId, canonical, 'Thực thể chuẩn hóa');
 
     // Task 4: Store rejection by identityKey
     const identityKey =

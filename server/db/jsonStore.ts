@@ -307,6 +307,20 @@ export class JsonDataStore implements DataStore {
 
   // --- Merge Management & Adjudication ---
 
+  /**
+   * Merge endpoints take document IDs straight from the request body, so every
+   * resolved document must be re-checked against the caller's org before any write.
+   * Without this a caller can merge into another tenant's canonical entity.
+   */
+  private assertInOrg(orgId: string, doc: { orgId?: string } | undefined, label: string): void {
+    if (!doc) {
+      throw new Error(`${label} không tồn tại`);
+    }
+    if (orgId && doc.orgId !== orgId) {
+      throw new Error(`${label} không thuộc tổ chức của bạn`);
+    }
+  }
+
   public async addPendingSuggestion(suggestion: MergeSuggestion): Promise<MergeSuggestion> {
     this.pendingSuggestions.set(suggestion.id, suggestion);
     this.scheduleFlush();
@@ -328,13 +342,15 @@ export class JsonDataStore implements DataStore {
   ): Promise<{ success: boolean; canonicalEntity: CanonicalEntity }> {
     // Task 3: Look up pending suggestion BEFORE removing it to preserve real model audit values
     const suggestion = this.pendingSuggestions.get(suggestionId);
+    if (suggestion) {
+      this.assertInOrg(orgId, suggestion.rawRecord, 'Gợi ý gộp');
+    }
 
     const raw = this.rawRecords.get(rawRecordId);
     const canonical = this.canonicalEntities.get(canonicalEntityId);
 
-    if (!raw || !canonical) {
-      throw new Error('Raw record or canonical entity not found');
-    }
+    this.assertInOrg(orgId, raw, 'Bản ghi nguồn');
+    this.assertInOrg(orgId, canonical, 'Thực thể chuẩn hóa');
 
     // 1. Create link record with true audit data
     const linkId = `link_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -410,7 +426,14 @@ export class JsonDataStore implements DataStore {
   ): Promise<{ success: boolean }> {
     // Task 3: Look up pending suggestion before deleting
     const suggestion = this.pendingSuggestions.get(suggestionId);
+    if (suggestion) {
+      this.assertInOrg(orgId, suggestion.rawRecord, 'Gợi ý gộp');
+    }
     const raw = this.rawRecords.get(rawRecordId);
+    const canonical = this.canonicalEntities.get(canonicalEntityId);
+
+    this.assertInOrg(orgId, raw, 'Bản ghi nguồn');
+    this.assertInOrg(orgId, canonical, 'Thực thể chuẩn hóa');
 
     // Task 4: Store rejection by identityKey
     const identityKey = raw?.identityKey || (raw ? buildIdentityKey({

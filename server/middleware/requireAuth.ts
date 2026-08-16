@@ -9,6 +9,21 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
+/**
+ * Consumer Google accounts get a private workspace keyed on their UID. A shared
+ * org_default would expose every user's uploaded attendee PII to every other user,
+ * because sign-in is open to any Google account. Corporate and institutional
+ * domains still share a workspace per domain, which is the intended collaboration
+ * unit. An explicit orgId on the user's profile document overrides both.
+ */
+function deriveOrgId(uid: string, email?: string): string {
+  const domain = email?.split('@')[1];
+  if (!domain || domain === 'gmail.com' || domain === 'googlemail.com') {
+    return `org_user_${uid}`;
+  }
+  return `org_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
+}
+
 export async function requireAuth(
   req: AuthenticatedRequest,
   res: Response,
@@ -22,30 +37,20 @@ export async function requireAuth(
     if (idToken && idToken !== 'null' && idToken !== 'undefined') {
       try {
         const decoded = await adminAuth.verifyIdToken(idToken);
-        let orgId = 'org_default';
+        let orgId = deriveOrgId(decoded.uid, decoded.email);
 
-        // 1. Check if user document has custom orgId configured
+        // An explicit orgId on the profile doc wins, so users can be assigned to a
+        // shared team workspace deliberately. Written only by the Admin SDK.
         try {
           const userDoc = await adminDb.collection('users').doc(decoded.uid).get();
           if (userDoc.exists && userDoc.data()?.orgId) {
             orgId = userDoc.data()!.orgId;
-          } else if (decoded.email) {
-            // Note on org_default: Consumer Gmail addresses (gmail.com, googlemail.com)
-            // intentionally share org_default workspace for demo simplicity.
-            // Corporate / institutional emails are partitioned by domain name.
-            const domain = decoded.email.split('@')[1];
-            if (domain && domain !== 'gmail.com' && domain !== 'googlemail.com') {
-              orgId = `org_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            }
           }
         } catch (dbErr: any) {
-          console.warn('[requireAuth] Failed to load user profile doc, using domain derivation:', dbErr.message);
-          if (decoded.email) {
-            const domain = decoded.email.split('@')[1];
-            if (domain && domain !== 'gmail.com' && domain !== 'googlemail.com') {
-              orgId = `org_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            }
-          }
+          console.warn(
+            '[requireAuth] Could not read user profile doc, using derived org:',
+            dbErr.message
+          );
         }
 
         req.user = {

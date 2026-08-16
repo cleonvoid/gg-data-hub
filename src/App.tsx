@@ -117,14 +117,20 @@ export function App() {
 
   // Reset Demo Data
   const handleSeedData = async () => {
+    const confirmed = window.confirm(
+      'CẢNH BÁO: Thao tác này sẽ XÓA VĨNH VIỄN TOÀN BỘ dữ liệu người tham gia, thực thể chuẩn hóa và lịch sử gộp của tổ chức để nạp lại dữ liệu mẫu.\n\nBạn có chắc chắn muốn tiếp tục không?'
+    );
+    if (!confirmed) return;
+
     setIsSeeding(true);
     try {
       const res = await seedDemoData();
       await loadStatsAndMerges();
       await loadEntities();
       showToast('Đã nạp lại dữ liệu sự kiện mẫu thành công!');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Seed failed:', err);
+      showToast(err?.message || 'Không thể nạp dữ liệu mẫu');
     } finally {
       setIsSeeding(false);
     }

@@ -145,7 +145,9 @@ export async function translateSearch(query: string): Promise<NLSearchTranslatio
 
 export async function listDriveFiles(token?: string) {
   const headers: Record<string, string> = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  // Drive's OAuth access token travels in its own header: Authorization is reserved
+  // for the Firebase ID token that requireAuth verifies, and authedFetch overwrites it.
+  if (token) headers['X-Drive-Token'] = token;
   const res = await authedFetch(`${API_BASE}/drive/files`, { headers });
   if (!res.ok) throw new Error('Không thể đọc danh sách tệp Google Drive');
   return res.json();
@@ -153,7 +155,7 @@ export async function listDriveFiles(token?: string) {
 
 export async function fetchDriveSheet(fileId: string, token?: string) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (token) headers['X-Drive-Token'] = token;
   const res = await authedFetch(`${API_BASE}/drive/fetch`, {
     method: 'POST',
     headers,
@@ -174,7 +176,14 @@ export async function parseUploadedXlsx(base64Data: string, fileName: string) {
 }
 
 export async function seedDemoData(): Promise<any> {
-  const res = await authedFetch(`${API_BASE}/seed`, { method: 'POST' });
-  if (!res.ok) throw new Error('Không thể nạp dữ liệu mẫu');
+  const res = await authedFetch(`${API_BASE}/seed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm: 'XOA_TOAN_BO_DU_LIEU' }),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Không thể nạp dữ liệu mẫu');
+  }
   return res.json();
 }

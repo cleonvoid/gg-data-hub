@@ -392,8 +392,8 @@ apiRouter.post('/search/translate', async (req: AuthenticatedRequest, res: Respo
  */
 apiRouter.get('/drive/files', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
+    // Express lowercases incoming header names.
+    const token = (req.headers['x-drive-token'] as string | undefined) || undefined;
     const files = await listDriveSpreadsheets(token);
     res.json(files);
   } catch (err: any) {
@@ -407,8 +407,8 @@ apiRouter.get('/drive/files', async (req: AuthenticatedRequest, res: Response) =
 apiRouter.post('/drive/fetch', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { fileId } = req.body;
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
+    // Express lowercases incoming header names.
+    const token = (req.headers['x-drive-token'] as string | undefined) || undefined;
 
     if (!fileId) {
       return res.status(400).json({ error: 'Thiếu ID tệp Google Sheets' });
@@ -440,11 +440,30 @@ apiRouter.post('/upload/parse', (req: AuthenticatedRequest, res: Response) => {
 });
 
 /**
- * 12. Seed / Reset Demo Data
+ * 12. Seed / Reset Demo Data — DESTRUCTIVE.
+ * seedInitialEventData() calls db.clearAll(orgId) first, wiping every record in the
+ * org. Layer 1 raw records are immutable by design and there is no backup, so this
+ * is gated on an explicit server flag plus a confirmation token in the body. Never
+ * enable ALLOW_DEMO_SEED on a deployment holding real attendee data.
  */
 apiRouter.post('/seed', async (req: AuthenticatedRequest, res: Response) => {
   try {
+    if (process.env.ALLOW_DEMO_SEED !== 'true') {
+      return res.status(403).json({
+        error: 'Chức năng nạp dữ liệu mẫu đã bị vô hiệu hóa trên môi trường này.',
+      });
+    }
+
+    if (req.body?.confirm !== 'XOA_TOAN_BO_DU_LIEU') {
+      return res.status(400).json({
+        error:
+          'Thao tác này sẽ XÓA TOÀN BỘ dữ liệu của tổ chức. Gửi kèm confirm="XOA_TOAN_BO_DU_LIEU" để xác nhận.',
+      });
+    }
+
     const orgId = req.user?.orgId || 'org_default';
+    console.warn(`[Seed] Destructive reset of org ${orgId} requested by ${req.user?.uid}`);
+
     await seedInitialEventData(orgId);
     const stats = await db.getStats(orgId);
     res.json({ success: true, message: 'Đã nạp dữ liệu mẫu thành công', stats });

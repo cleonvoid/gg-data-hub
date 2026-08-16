@@ -3,7 +3,6 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { apiRouter } from './server/routes/api.js';
 import { db } from './server/db/index.js';
-import { seedInitialEventData } from './server/db/seedData.js';
 
 dotenv.config();
 
@@ -31,13 +30,12 @@ async function startServer() {
   app.use('/api', apiRouter);
 
   // Boot-time reachability check. Starting up pointed at an unreachable database is
-  // worse than not starting in production: the failure would surface as empty results.
+  // worse than not starting: the failure would only surface later as empty results.
+  // No seeding here — each user now has their own workspace, so demo data is loaded
+  // per-org on request via POST /api/seed.
   try {
-    const existingEntities = await db.getAllCanonicalEntities('org_default');
-    if (existingEntities.length === 0) {
-      console.log('Database is empty on start. Populating initial seed data...');
-      await seedInitialEventData('org_default');
-    }
+    await db.getAllCanonicalEntities('org_default');
+    console.log('[Startup] Database reachable.');
   } catch (e: any) {
     if (process.env.DATA_STORE === 'firestore') {
       console.error(
@@ -47,7 +45,7 @@ async function startServer() {
       );
       process.exit(1);
     }
-    console.warn('[Startup] Seeding check failed on the JSON driver:', e);
+    console.warn('[Startup] Reachability check failed on the JSON driver:', e);
   }
 
   // Vite middleware for development vs static serve for production
