@@ -5,7 +5,7 @@ import { apiRouter } from './server/routes/api.js';
 import { db } from './server/db/index.js';
 import { seedInitialEventData } from './server/db/seedData.js';
 
-dotenv.config({ override: true });
+dotenv.config();
 
 async function startServer() {
   const app = express();
@@ -29,7 +29,7 @@ async function startServer() {
   app.use('/api', apiRouter);
 
   // Boot-time reachability check. Starting up pointed at an unreachable database is
-  // worse than not starting: the failure would only surface later as empty results.
+  // worse than not starting in production: the failure would surface as empty results.
   try {
     const existingEntities = await db.getAllCanonicalEntities('org_default');
     if (existingEntities.length === 0) {
@@ -38,14 +38,33 @@ async function startServer() {
     }
   } catch (e: any) {
     if (process.env.DATA_STORE === 'firestore') {
-      console.error(
-        '[Startup] Firestore is unreachable. Grant the Cloud Run service account ' +
-          'roles/datastore.user and confirm FIREBASE_PROJECT_ID / FIRESTORE_DATABASE_ID.',
-        e
-      );
-      process.exit(1);
+      if (process.env.NODE_ENV === 'production') {
+        console.error(
+          '[Startup] Firestore is unreachable. Grant the Cloud Run service account ' +
+            'roles/datastore.user and confirm FIREBASE_PROJECT_ID / FIRESTORE_DATABASE_ID.',
+          e
+        );
+        process.exit(1);
+      } else {
+        console.warn(
+          '[Startup] Firestore is unreachable in local dev preview (missing GCP credentials). Falling back to JSON data store:',
+          e?.message || e
+        );
+        const { JsonDataStore } = await import('./server/db/jsonStore.js');
+        const { setStore } = await import('./server/db/index.js');
+        setStore(new JsonDataStore());
+        try {
+          const entities = await db.getAllCanonicalEntities('org_default');
+          if (entities.length === 0) {
+            await seedInitialEventData('org_default');
+          }
+        } catch (seedErr) {
+          console.warn('[Startup] Fallback seed check failed on JSON driver:', seedErr);
+        }
+      }
+    } else {
+      console.warn('[Startup] Seeding check failed on the JSON driver:', e);
     }
-    console.warn('[Startup] Seeding check failed on the JSON driver:', e);
   }
 
   // Vite middleware for development vs static serve for production
