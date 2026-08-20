@@ -1,15 +1,14 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
+
+dotenv.config({ override: true });
+
 import { apiRouter } from './server/routes/api.js';
 import { db } from './server/db/index.js';
 
-dotenv.config();
-
 async function startServer() {
   const app = express();
-  // Cloud Run injects PORT and terminates containers that do not bind it.
-  // 3000 is only the local default.
   const PORT = Number(process.env.PORT) || 3000;
 
   // JSON and URL-encoded body parsers (with 50mb limit for spreadsheet buffers)
@@ -29,23 +28,12 @@ async function startServer() {
   // API Routes
   app.use('/api', apiRouter);
 
-  // Boot-time reachability check. Starting up pointed at an unreachable database is
-  // worse than not starting: the failure would only surface later as empty results.
-  // No seeding here — each user now has their own workspace, so demo data is loaded
-  // per-org on request via POST /api/seed.
+  // Boot-time reachability check (non-fatal warning so dev server never crashes at startup)
   try {
     await db.getAllCanonicalEntities('org_default');
     console.log('[Startup] Database reachable.');
   } catch (e: any) {
-    if (process.env.DATA_STORE === 'firestore') {
-      console.error(
-        '[Startup] Firestore is unreachable. Grant the Cloud Run service account ' +
-          'roles/datastore.user and confirm FIREBASE_PROJECT_ID / FIRESTORE_DATABASE_ID.',
-        e
-      );
-      process.exit(1);
-    }
-    console.warn('[Startup] Reachability check failed on the JSON driver:', e);
+    console.warn('[Startup] Reachability check warning:', e);
   }
 
   // Vite middleware for development vs static serve for production

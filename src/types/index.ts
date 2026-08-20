@@ -13,6 +13,10 @@ export type CanonicalFieldKey = keyof CanonicalSchema;
 
 export interface ColumnMappingItem {
   sourceColumn: string;
+  /** Zero-based index of this column in the source sheet. Row cells are read by
+   *  this value, never by array position — the mapping array order is not
+   *  guaranteed to match column order. */
+  sourceIndex: number;
   targetField: CanonicalFieldKey | 'ignore';
   confidence: number;
   reasoning: string;
@@ -41,6 +45,9 @@ export interface RawSourceRecord {
   identityKey?: string;
   embedding?: number[];
   embeddingSource?: 'gemini' | 'fallback';
+  /** Identifier of the space this vector lives in. Vectors from different models are
+   *  not comparable; cosine similarity across them is meaningless. */
+  embeddingModel?: string;
   importedAt: string;
   orgId: string;
 }
@@ -56,12 +63,18 @@ export interface CanonicalEntity {
   aliases: string[];
   alternateEmails: string[];
   alternateOrgs: string[];
+  /** Distinct event names this person has appeared in, deduplicated. Enables event
+   *  search and makes eventAppearancesCount mean distinct events rather than rows. */
+  eventNames: string[];
   eventAppearancesCount: number;
   firstSeenAt: string;
   lastSeenAt: string;
   sourceFilesCount: number;
   confidenceScore: number;
   embedding?: number[];
+  /** Identifier of the space this vector lives in. Vectors from different models are
+   *  not comparable; cosine similarity across them is meaningless. */
+  embeddingModel?: string;
   orgId: string;
   createdAt: string;
   updatedAt: string;
@@ -126,7 +139,7 @@ export interface FilterParams {
 }
 
 export interface StructuredQueryFilter {
-  field: 'canonicalName' | 'canonicalOrg' | 'canonicalRole' | 'canonicalEmail' | 'canonicalPhone' | 'eventAppearancesCount' | 'eventName' | 'eventDate';
+  field: 'canonicalName' | 'canonicalOrg' | 'canonicalRole' | 'canonicalEmail' | 'canonicalPhone' | 'eventAppearancesCount' | 'eventNames' | 'eventName' | 'eventDate';
   operator: 'equals' | 'contains' | 'startsWith' | 'greaterThan' | 'lessThan' | 'in';
   value: string | number;
 }

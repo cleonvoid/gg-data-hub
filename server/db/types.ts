@@ -26,6 +26,7 @@ export interface DataStore {
     }[];
   } | null>;
   addRawRecord(raw: RawSourceRecord): Promise<RawSourceRecord>;
+  getRawRecord(id: string): Promise<RawSourceRecord | undefined>;
   createCanonicalEntity(orgId: string, payload: Partial<CanonicalEntity>): Promise<CanonicalEntity>;
   updateCanonicalEntity(orgId: string, id: string, payload: Partial<CanonicalEntity>): Promise<CanonicalEntity>;
   addEntityLink(link: EntityLink): Promise<EntityLink>;
@@ -49,7 +50,8 @@ export interface DataStore {
     orgId: string,
     queryEmbedding: number[],
     topN?: number,
-    minSimilarity?: number
+    minSimilarity?: number,
+    embeddingModel?: string
   ): Promise<{ entity: CanonicalEntity; similarity: number }[]>;
   isPairRejected(orgId: string, identityKeyOrRecordId: string, canonicalEntityId: string): Promise<boolean>;
   recordRejection(orgId: string, identityKey: string, canonicalEntityId: string): Promise<void>;

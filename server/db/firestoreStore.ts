@@ -111,12 +111,14 @@ export class FirestoreDataStore implements DataStore {
       aliases: data.aliases || [data.canonicalName ? data.canonicalName.trim() : 'Khách không tên'],
       alternateEmails: data.alternateEmails || (data.canonicalEmail ? [data.canonicalEmail.trim()] : []),
       alternateOrgs: data.alternateOrgs || (data.canonicalOrg ? [data.canonicalOrg.trim()] : []),
+      eventNames: data.eventNames || [],
       eventAppearancesCount: data.eventAppearancesCount || 1,
       firstSeenAt: data.firstSeenAt || now,
       lastSeenAt: data.lastSeenAt || now,
       sourceFilesCount: data.sourceFilesCount || 1,
       confidenceScore: data.confidenceScore ?? 1.0,
       embedding: data.embedding,
+      embeddingModel: data.embeddingModel,
       orgId: orgId || data.orgId || 'org_default',
       createdAt: now,
       updatedAt: now,
@@ -229,7 +231,8 @@ export class FirestoreDataStore implements DataStore {
     orgId: string,
     queryEmbedding: number[],
     topN: number = 5,
-    minSimilarity: number = 0.65
+    minSimilarity: number = 0.65,
+    embeddingModel?: string
   ): Promise<{ entity: CanonicalEntity; similarity: number }[]> {
     // Try native Firestore findNearest vector search if index exists
     try {
@@ -247,13 +250,23 @@ export class FirestoreDataStore implements DataStore {
           .get();
 
         const results: { entity: CanonicalEntity; similarity: number }[] = [];
+        let skippedMismatchedModelCount = 0;
         for (const doc of snap.docs) {
           const entity = fromDoc<CanonicalEntity>(doc);
+          if (embeddingModel && entity.embeddingModel && entity.embeddingModel !== embeddingModel) {
+            skippedMismatchedModelCount++;
+            continue;
+          }
           const dist = doc.get('_distance') ?? 1;
           const similarity = Math.max(0, 1 - dist);
           if (similarity >= minSimilarity) {
             results.push({ entity, similarity });
           }
+        }
+        if (skippedMismatchedModelCount > 0) {
+          console.log(
+            `[Firestore findNearest] Skipped ${skippedMismatchedModelCount} candidates due to mismatched embeddingModel (query: ${embeddingModel})`
+          );
         }
         return results.slice(0, topN);
       }
@@ -272,8 +285,16 @@ export class FirestoreDataStore implements DataStore {
     // In-memory fallback over canonical entities in org
     const allEntities = await this.getAllCanonicalEntities(orgId);
     const results: { entity: CanonicalEntity; similarity: number }[] = [];
+    let skippedMismatchedModelCount = 0;
 
     for (const entity of allEntities) {
+      // Vectors from different models are not comparable. Skipping is correct:
+      // a wrong similarity is worse than no candidate.
+      if (embeddingModel && entity.embeddingModel && entity.embeddingModel !== embeddingModel) {
+        skippedMismatchedModelCount++;
+        continue;
+      }
+
       let bestSim = 0;
       if (entity.embedding && Array.isArray(entity.embedding) && entity.embedding.length > 0) {
         bestSim = cosineSimilarity(queryEmbedding, entity.embedding);
@@ -288,6 +309,9 @@ export class FirestoreDataStore implements DataStore {
           const l = fromDoc<EntityLink>(linkDoc);
           const raw = await this.getRawRecord(l.rawRecordId);
           if (raw?.embedding && Array.isArray(raw.embedding)) {
+            if (embeddingModel && raw.embeddingModel && raw.embeddingModel !== embeddingModel) {
+              continue;
+            }
             const sim = cosineSimilarity(queryEmbedding, raw.embedding);
             if (sim > bestSim) bestSim = sim;
           }
@@ -297,6 +321,12 @@ export class FirestoreDataStore implements DataStore {
       if (bestSim >= minSimilarity) {
         results.push({ entity, similarity: bestSim });
       }
+    }
+
+    if (skippedMismatchedModelCount > 0) {
+      console.log(
+        `[Firestore in-memory scan] Skipped ${skippedMismatchedModelCount} candidates due to mismatched embeddingModel (query: ${embeddingModel})`
+      );
     }
 
     results.sort((a, b) => b.similarity - a.similarity);
@@ -375,6 +405,11 @@ export class FirestoreDataStore implements DataStore {
 
     // 2. Merge details into canonical entity
     const parsed = raw.parsedFields;
+    if (!canonical.aliases) canonical.aliases = [];
+    if (!canonical.alternateEmails) canonical.alternateEmails = [];
+    if (!canonical.alternateOrgs) canonical.alternateOrgs = [];
+    if (!canonical.eventNames) canonical.eventNames = [];
+
     if (parsed.fullName && !canonical.aliases.includes(parsed.fullName.trim())) {
       canonical.aliases.push(parsed.fullName.trim());
     }
@@ -393,13 +428,27 @@ export class FirestoreDataStore implements DataStore {
       canonical.canonicalPhone = parsed.phone.trim();
     }
 
-    // Count appearances
+    // Union the event name from this record before recomputing counters.
+    if (parsed.eventName && !canonical.eventNames.includes(parsed.eventName.trim())) {
+      canonical.eventNames.push(parsed.eventName.trim());
+    }
+
+    // Distinct events, not row count: one attendee list can contribute many rows.
+    canonical.eventAppearancesCount = Math.max(1, canonical.eventNames.length);
+
+    // Count appearances and source files
     const linksSnap = await this.entityLinksCol
       .where('canonicalEntityId', '==', canonical.id)
       .where('status', '==', 'approved')
       .get();
 
-    canonical.eventAppearancesCount = linksSnap.size;
+    const linkedRaws = await Promise.all(
+      linksSnap.docs.map((d) => this.getRawRecord(fromDoc<EntityLink>(d).rawRecordId))
+    );
+    const uniqueFiles = new Set(
+      linkedRaws.filter((r): r is RawSourceRecord => !!r).map((r) => r.sourceFileId)
+    );
+    canonical.sourceFilesCount = Math.max(1, uniqueFiles.size);
     canonical.lastSeenAt = new Date().toISOString();
 
     if (!canonical.embedding && raw.embedding) {
@@ -480,6 +529,7 @@ export class FirestoreDataStore implements DataStore {
         canonicalEmail: raw.parsedFields.email,
         canonicalPhone: raw.parsedFields.phone,
         embedding: raw.embedding,
+        embeddingModel: raw.embeddingModel,
         orgId,
       });
 
@@ -573,8 +623,11 @@ export class FirestoreDataStore implements DataStore {
         const aliasMatch = (e.aliases || []).some((a) =>
           removeVietnameseDiacritics(a.toLowerCase()).includes(qUnaccented)
         );
+        const eventMatch = (e.eventNames || []).some((ev) =>
+          removeVietnameseDiacritics(ev.toLowerCase()).includes(qUnaccented)
+        );
 
-        return nameMatch || orgMatch || emailMatch || roleMatch || aliasMatch;
+        return nameMatch || orgMatch || emailMatch || roleMatch || aliasMatch || eventMatch;
       });
     }
 
@@ -602,6 +655,17 @@ export class FirestoreDataStore implements DataStore {
             if (filter.operator === 'lessThan') return num <= target;
             if (filter.operator === 'equals') return num === target;
             return true;
+          }
+
+          if (Array.isArray(val)) {
+            const joined = removeVietnameseDiacritics(val.join(' ').toLowerCase());
+            const target = removeVietnameseDiacritics(String(filter.value || '').toLowerCase());
+            if (filter.operator === 'equals') {
+              return val.some(
+                (v) => removeVietnameseDiacritics(String(v).toLowerCase()) === target
+              );
+            }
+            return joined.includes(target);
           }
 
           const strVal = String(val || '').toLowerCase();

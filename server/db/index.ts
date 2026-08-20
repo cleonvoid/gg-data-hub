@@ -3,7 +3,7 @@ import { DataStore } from './types.js';
 import { JsonDataStore } from './jsonStore.js';
 import { FirestoreDataStore } from './firestoreStore.js';
 
-dotenv.config();
+dotenv.config({ override: true });
 
 /**
  * The driver is chosen once at startup and never changes at runtime. An automatic

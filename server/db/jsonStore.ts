@@ -32,8 +32,7 @@ export class JsonDataStore implements DataStore {
   private storageFilePath: string;
   private flushTimer: NodeJS.Timeout | null = null;
 
-  constructor() {
-    const dataDir = path.join(process.cwd(), '.data');
+  constructor(dataDir: string = path.join(process.cwd(), '.data')) {
     if (!fs.existsSync(dataDir)) {
       try {
         fs.mkdirSync(dataDir, { recursive: true });
@@ -165,12 +164,14 @@ export class JsonDataStore implements DataStore {
       aliases: data.aliases || [data.canonicalName ? data.canonicalName.trim() : 'Khách không tên'],
       alternateEmails: data.alternateEmails || (data.canonicalEmail ? [data.canonicalEmail.trim()] : []),
       alternateOrgs: data.alternateOrgs || (data.canonicalOrg ? [data.canonicalOrg.trim()] : []),
+      eventNames: data.eventNames || [],
       eventAppearancesCount: data.eventAppearancesCount || 1,
       firstSeenAt: data.firstSeenAt || now,
       lastSeenAt: data.lastSeenAt || now,
       sourceFilesCount: data.sourceFilesCount || 1,
       confidenceScore: data.confidenceScore ?? 1.0,
       embedding: data.embedding,
+      embeddingModel: data.embeddingModel,
       orgId: orgId || data.orgId || 'org_default',
       createdAt: now,
       updatedAt: now,
@@ -268,14 +269,24 @@ export class JsonDataStore implements DataStore {
     orgId: string,
     queryEmbedding: number[],
     topN: number = 5,
-    minSimilarity: number = 0.65
+    minSimilarity: number = 0.65,
+    embeddingModel?: string
   ): Promise<{ entity: CanonicalEntity; similarity: number }[]> {
     const results: { entity: CanonicalEntity; similarity: number }[] = [];
     const orgEntities = Array.from(this.canonicalEntities.values()).filter(
       (e) => !orgId || e.orgId === orgId
     );
 
+    let skippedMismatchedModelCount = 0;
+
     for (const entity of orgEntities) {
+      // Vectors from different models are not comparable. Skipping is correct:
+      // a wrong similarity is worse than no candidate.
+      if (embeddingModel && entity.embeddingModel && entity.embeddingModel !== embeddingModel) {
+        skippedMismatchedModelCount++;
+        continue;
+      }
+
       let bestSim = 0;
 
       // 1. Check canonical embedding directly if present
@@ -287,6 +298,9 @@ export class JsonDataStore implements DataStore {
         for (const link of links) {
           const rawRec = this.rawRecords.get(link.rawRecordId);
           if (rawRec?.embedding) {
+            if (embeddingModel && rawRec.embeddingModel && rawRec.embeddingModel !== embeddingModel) {
+              continue;
+            }
             const sim = cosineSimilarity(queryEmbedding, rawRec.embedding);
             if (sim > bestSim) {
               bestSim = sim;
@@ -298,6 +312,12 @@ export class JsonDataStore implements DataStore {
       if (bestSim >= minSimilarity) {
         results.push({ entity, similarity: bestSim });
       }
+    }
+
+    if (skippedMismatchedModelCount > 0) {
+      console.log(
+        `[findTopCandidatesByVector] Skipped ${skippedMismatchedModelCount} candidates due to mismatched embeddingModel (query: ${embeddingModel})`
+      );
     }
 
     // Sort descending by similarity score
@@ -373,6 +393,11 @@ export class JsonDataStore implements DataStore {
 
     // 2. Merge details into canonical entity
     const parsed = raw.parsedFields;
+    if (!canonical.aliases) canonical.aliases = [];
+    if (!canonical.alternateEmails) canonical.alternateEmails = [];
+    if (!canonical.alternateOrgs) canonical.alternateOrgs = [];
+    if (!canonical.eventNames) canonical.eventNames = [];
+
     if (parsed.fullName && !canonical.aliases.includes(parsed.fullName.trim())) {
       canonical.aliases.push(parsed.fullName.trim());
     }
@@ -391,7 +416,15 @@ export class JsonDataStore implements DataStore {
       canonical.canonicalPhone = parsed.phone.trim();
     }
 
-    // Recalculate event appearances and source files
+    // Union the event name from this record before recomputing counters.
+    if (parsed.eventName && !canonical.eventNames.includes(parsed.eventName.trim())) {
+      canonical.eventNames.push(parsed.eventName.trim());
+    }
+
+    // Distinct events, not row count: one attendee list can contribute many rows.
+    canonical.eventAppearancesCount = Math.max(1, canonical.eventNames.length);
+
+    // Recalculate source files
     const approvedLinks = this.getEntityLinksForCanonical(canonical.id);
     const uniqueFiles = new Set<string>();
     for (const l of approvedLinks) {
@@ -399,7 +432,6 @@ export class JsonDataStore implements DataStore {
       if (r) uniqueFiles.add(r.sourceFileId);
     }
 
-    canonical.eventAppearancesCount = approvedLinks.length;
     canonical.sourceFilesCount = Math.max(1, uniqueFiles.size);
     canonical.lastSeenAt = new Date().toISOString();
 
@@ -475,6 +507,7 @@ export class JsonDataStore implements DataStore {
         canonicalEmail: raw.parsedFields.email,
         canonicalPhone: raw.parsedFields.phone,
         embedding: raw.embedding,
+        embeddingModel: raw.embeddingModel,
         orgId,
       });
 
@@ -572,11 +605,14 @@ export class JsonDataStore implements DataStore {
         const roleMatch =
           e.canonicalRole.toLowerCase().includes(q) ||
           removeVietnameseDiacritics(e.canonicalRole.toLowerCase()).includes(qUnaccented);
-        const aliasMatch = e.aliases.some((a) =>
+        const aliasMatch = (e.aliases || []).some((a) =>
           removeVietnameseDiacritics(a.toLowerCase()).includes(qUnaccented)
         );
+        const eventMatch = (e.eventNames || []).some((ev) =>
+          removeVietnameseDiacritics(ev.toLowerCase()).includes(qUnaccented)
+        );
 
-        return nameMatch || orgMatch || emailMatch || roleMatch || aliasMatch;
+        return nameMatch || orgMatch || emailMatch || roleMatch || aliasMatch || eventMatch;
       });
     }
 
@@ -604,6 +640,17 @@ export class JsonDataStore implements DataStore {
             if (filter.operator === 'lessThan') return num <= target;
             if (filter.operator === 'equals') return num === target;
             return true;
+          }
+
+          if (Array.isArray(val)) {
+            const joined = removeVietnameseDiacritics(val.join(' ').toLowerCase());
+            const target = removeVietnameseDiacritics(String(filter.value || '').toLowerCase());
+            if (filter.operator === 'equals') {
+              return val.some(
+                (v) => removeVietnameseDiacritics(String(v).toLowerCase()) === target
+              );
+            }
+            return joined.includes(target);
           }
 
           const strVal = String(val || '').toLowerCase();

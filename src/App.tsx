@@ -140,14 +140,25 @@ export function App() {
   const handleImportComplete = (summary: any) => {
     loadStatsAndMerges();
     loadEntities();
+    const skippedText =
+      summary.skippedDuplicateCount && summary.skippedDuplicateCount > 0
+        ? ` (bỏ qua ${summary.skippedDuplicateCount} bản ghi đã được nhập trước đó)`
+        : '';
+
     if (summary.fallbackEmbeddingCount && summary.fallbackEmbeddingCount > 0) {
       setFallbackEmbeddingCount(summary.fallbackEmbeddingCount);
-      showToast(`Cảnh báo: ${summary.fallbackEmbeddingCount} bản ghi dùng vector dự phòng do dịch vụ embedding không khả dụng. Chất lượng phân giải thực thể bị giảm.`);
+      showToast(
+        `Cảnh báo: ${summary.fallbackEmbeddingCount} bản ghi dùng vector dự phòng do dịch vụ embedding không khả dụng. Chất lượng phân giải thực thể bị giảm.${skippedText}`
+      );
     } else if (summary.pendingMergeSuggestionsCount > 0) {
       setIsMergeModalOpen(true);
-      showToast(`Đã nạp ${summary.totalIngested} bản ghi. Phát hiện ${summary.pendingMergeSuggestionsCount} trường hợp cần duyệt gộp!`);
+      showToast(
+        `Đã nạp ${summary.totalIngested} bản ghi${skippedText}. Phát hiện ${summary.pendingMergeSuggestionsCount} trường hợp cần duyệt gộp!`
+      );
+    } else if (summary.skippedDuplicateCount > 0 && summary.totalIngested === 0) {
+      showToast(`Toàn bộ ${summary.skippedDuplicateCount} bản ghi đã được nhập trước đó (bỏ qua trùng lặp).`);
     } else {
-      showToast(`Đã nạp ${summary.totalIngested} bản ghi thành công!`);
+      showToast(`Đã nạp ${summary.totalIngested} bản ghi thành công!${skippedText}`);
     }
   };
 

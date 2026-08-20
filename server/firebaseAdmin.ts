@@ -4,10 +4,8 @@ import { getAuth } from 'firebase-admin/auth';
 import fs from 'fs';
 import path from 'path';
 
-let projectId = process.env.FIREBASE_PROJECT_ID || 'light-broker-x8gvj';
-let firestoreDatabaseId =
-  process.env.FIRESTORE_DATABASE_ID ||
-  'ai-studio-eventdatahub-50743d01-7c2c-4c9b-8521-419982eee455';
+let projectId = 'light-broker-x8gvj';
+let firestoreDatabaseId = 'ai-studio-eventdatahub-50743d01-7c2c-4c9b-8521-419982eee455';
 
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -19,6 +17,15 @@ try {
   }
 } catch (e) {
   console.warn('[FirebaseAdmin] Failed reading config file, falling back to defaults:', e);
+}
+
+// Environment variables take highest priority if explicitly configured
+if (process.env.FIREBASE_PROJECT_ID) {
+  projectId = process.env.FIREBASE_PROJECT_ID;
+}
+
+if (process.env.FIRESTORE_DATABASE_ID) {
+  firestoreDatabaseId = process.env.FIRESTORE_DATABASE_ID;
 }
 
 const app =

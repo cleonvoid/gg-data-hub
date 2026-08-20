@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import {
   inferSchemaMapping,
@@ -19,6 +20,7 @@ import {
   MergeSuggestion,
 } from '../../src/types/index.js';
 import { buildIdentityString, buildIdentityKey } from '../utils/vietnamese.js';
+import { extractRowFields } from '../utils/mapping.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/requireAuth.js';
 
 export const apiRouter = Router();
@@ -149,12 +151,19 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ error: 'Thiếu thông tin ánh xạ hoặc dữ liệu hàng' });
     }
 
+    if (mappings.some((m: ColumnMappingItem) => typeof m.sourceIndex !== 'number')) {
+      return res.status(400).json({
+        error: 'Ánh xạ cột thiếu chỉ số cột nguồn (sourceIndex). Vui lòng nhận diện lại cấu trúc tệp.',
+      });
+    }
+
     const dataRows = rows.slice((headerRowIndex ?? 0) + 1);
 
     const createdRecordIds: string[] = [];
     const newSuggestions: MergeSuggestion[] = [];
     let autoCreatedEntitiesCount = 0;
     let fallbackEmbeddingCount = 0;
+    let skippedDuplicateCount = 0;
 
     for (let rIdx = 0; rIdx < dataRows.length; rIdx++) {
       const row = dataRows[rIdx];
@@ -163,19 +172,9 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
       }
 
       // 1. Parse raw json and mapped fields
-      const rawJson: Record<string, any> = {};
-      const parsedFields: Partial<CanonicalSchema> = {
+      const { rawJson, parsedFields } = extractRowFields(row, mappings, {
         eventName: defaultEventName,
         eventDate: defaultEventDate,
-      };
-
-      mappings.forEach((m: ColumnMappingItem, colIdx: number) => {
-        const val = row[colIdx] !== undefined && row[colIdx] !== null ? String(row[colIdx]).trim() : '';
-        rawJson[m.sourceColumn || `Cột_${colIdx + 1}`] = val;
-
-        if (m.targetField && m.targetField !== 'ignore' && val) {
-          (parsedFields as any)[m.targetField] = val;
-        }
       });
 
       // Require at least a name or email to be a valid attendee record
@@ -183,7 +182,21 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
         continue;
       }
 
-      const recId = `raw_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      // Deterministic per (org, file, row): re-importing the same sheet must not
+      // create a second copy of every record.
+      const recId =
+        'raw_' +
+        createHash('sha1')
+          .update(`${orgId}|${sourceFileId || sourceFileName}|${(headerRowIndex ?? 0) + 1 + rIdx}`)
+          .digest('hex')
+          .slice(0, 24);
+
+      const alreadyImported = await db.getRawRecord(recId);
+      if (alreadyImported) {
+        skippedDuplicateCount++;
+        continue;
+      }
+
       const normalizedIdentityKey = buildIdentityString({
         fullName: parsedFields.fullName,
         organization: parsedFields.organization,
@@ -201,6 +214,7 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
       const embResult = await generateIdentityEmbedding(normalizedIdentityKey);
       const embedding = embResult.vector;
       const embeddingSource = embResult.source;
+      const embeddingModel = embResult.model;
       if (embeddingSource === 'fallback') {
         fallbackEmbeddingCount++;
       }
@@ -217,6 +231,7 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
         identityKey,
         embedding,
         embeddingSource,
+        embeddingModel,
         importedAt: new Date().toISOString(),
         orgId,
       };
@@ -226,7 +241,13 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
       createdRecordIds.push(rawRecord.id);
 
       // --- Stage 1: Vector Similarity Candidate Retrieval ---
-      const topCandidates = await db.findTopCandidatesByVector(orgId, embedding, 3, 0.68);
+      const topCandidates = await db.findTopCandidatesByVector(
+        orgId,
+        embedding,
+        3,
+        0.68,
+        embResult.model
+      );
 
       let foundMatch = false;
 
@@ -295,6 +316,7 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
           canonicalEmail: parsedFields.email,
           canonicalPhone: parsedFields.phone,
           embedding,
+          embeddingModel: embResult.model,
           orgId,
         });
 
@@ -324,6 +346,7 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
       newEntitiesCreated: autoCreatedEntitiesCount,
       pendingMergeSuggestionsCount: newSuggestions.length,
       fallbackEmbeddingCount,
+      skippedDuplicateCount,
       suggestions: newSuggestions,
     });
   } catch (err: any) {

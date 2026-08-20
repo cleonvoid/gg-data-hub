@@ -16,7 +16,7 @@ export interface AuthenticatedRequest extends Request {
  * domains still share a workspace per domain, which is the intended collaboration
  * unit. An explicit orgId on the user's profile document overrides both.
  */
-function deriveOrgId(uid: string, email?: string): string {
+export function deriveOrgId(uid: string, email?: string): string {
   const domain = email?.split('@')[1];
   if (!domain || domain === 'gmail.com' || domain === 'googlemail.com') {
     return `org_user_${uid}`;

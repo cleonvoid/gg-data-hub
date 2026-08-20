@@ -28,10 +28,26 @@ async function authedFetch(url: string, options: RequestInit = {}): Promise<Resp
   });
 }
 
+async function parseJsonResponse<T>(res: Response, fallbackErrorMsg: string): Promise<T> {
+  const contentType = res.headers.get('content-type') || '';
+  if (!res.ok) {
+    if (contentType.includes('application/json')) {
+      const errorJson = await res.json().catch(() => null);
+      throw new Error(errorJson?.error || errorJson?.detail || fallbackErrorMsg);
+    }
+    const text = await res.text().catch(() => '');
+    throw new Error(fallbackErrorMsg + (text && text.length < 150 ? `: ${text}` : ''));
+  }
+  if (!contentType.includes('application/json')) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Định dạng phản hồi không hợp lệ từ máy chủ (${res.status})` + (text && text.length < 150 ? `: ${text}` : ''));
+  }
+  return res.json();
+}
+
 export async function fetchStats(): Promise<IngestionStats> {
   const res = await authedFetch(`${API_BASE}/stats`);
-  if (!res.ok) throw new Error('Không thể tải thống kê hệ thống');
-  return res.json();
+  return parseJsonResponse<IngestionStats>(res, 'Không thể tải thống kê hệ thống');
 }
 
 export async function fetchEntities(params: {
@@ -58,8 +74,12 @@ export async function fetchEntities(params: {
   }
 
   const res = await authedFetch(`${API_BASE}/entities?${query.toString()}`);
-  if (!res.ok) throw new Error('Không thể tìm kiếm danh sách thực thể');
-  return res.json();
+  return parseJsonResponse<{
+    items: CanonicalEntity[];
+    total: number;
+    page: number;
+    limit: number;
+  }>(res, 'Không thể tìm kiếm danh sách thực thể');
 }
 
 export async function fetchEntityDetails(id: string): Promise<{
@@ -71,8 +91,14 @@ export async function fetchEntityDetails(id: string): Promise<{
   }[];
 }> {
   const res = await authedFetch(`${API_BASE}/entities/${id}`);
-  if (!res.ok) throw new Error('Không thể tải chi tiết thực thể');
-  return res.json();
+  return parseJsonResponse<{
+    canonicalEntity: CanonicalEntity;
+    rawRecords: {
+      rawRecord: RawSourceRecord;
+      link: EntityLink;
+      fieldDifferences: Record<string, string>;
+    }[];
+  }>(res, 'Không thể tải chi tiết thực thể');
 }
 
 export async function inferSchema(rows: any[][], fileName: string): Promise<SchemaMappingProposal> {
@@ -81,8 +107,7 @@ export async function inferSchema(rows: any[][], fileName: string): Promise<Sche
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rows, fileName }),
   });
-  if (!res.ok) throw new Error('Không thể phân tích cấu trúc bảng tính');
-  return res.json();
+  return parseJsonResponse<SchemaMappingProposal>(res, 'Không thể phân tích cấu trúc bảng tính');
 }
 
 export async function ingestSpreadsheet(payload: {
@@ -100,6 +125,7 @@ export async function ingestSpreadsheet(payload: {
   newEntitiesCreated: number;
   pendingMergeSuggestionsCount: number;
   fallbackEmbeddingCount: number;
+  skippedDuplicateCount: number;
   suggestions: MergeSuggestion[];
 }> {
   const res = await authedFetch(`${API_BASE}/ingest`, {
@@ -107,14 +133,20 @@ export async function ingestSpreadsheet(payload: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Không thể nạp và chuẩn hóa dữ liệu');
-  return res.json();
+  return parseJsonResponse<{
+    success: boolean;
+    totalIngested: number;
+    newEntitiesCreated: number;
+    pendingMergeSuggestionsCount: number;
+    fallbackEmbeddingCount: number;
+    skippedDuplicateCount: number;
+    suggestions: MergeSuggestion[];
+  }>(res, 'Không thể nạp và chuẩn hóa dữ liệu');
 }
 
 export async function fetchPendingMerges(): Promise<MergeSuggestion[]> {
   const res = await authedFetch(`${API_BASE}/merges/pending`);
-  if (!res.ok) throw new Error('Không thể tải danh sách gợi ý gộp');
-  return res.json();
+  return parseJsonResponse<MergeSuggestion[]>(res, 'Không thể tải danh sách gợi ý gộp');
 }
 
 export async function adjudicateMerge(payload: {
@@ -129,8 +161,7 @@ export async function adjudicateMerge(payload: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Lỗi khi thực hiện phê duyệt');
-  return res.json();
+  return parseJsonResponse<{ success: boolean; action: string }>(res, 'Lỗi khi thực hiện phê duyệt');
 }
 
 export async function translateSearch(query: string): Promise<NLSearchTranslationResponse> {
@@ -139,21 +170,19 @@ export async function translateSearch(query: string): Promise<NLSearchTranslatio
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),
   });
-  if (!res.ok) throw new Error('Lỗi khi biên dịch câu truy vấn');
-  return res.json();
+  return parseJsonResponse<NLSearchTranslationResponse>(res, 'Lỗi khi biên dịch câu truy vấn');
 }
 
-export async function listDriveFiles(token?: string) {
+export async function listDriveFiles(token?: string): Promise<{ files: any[] }> {
   const headers: Record<string, string> = {};
   // Drive's OAuth access token travels in its own header: Authorization is reserved
   // for the Firebase ID token that requireAuth verifies, and authedFetch overwrites it.
   if (token) headers['X-Drive-Token'] = token;
   const res = await authedFetch(`${API_BASE}/drive/files`, { headers });
-  if (!res.ok) throw new Error('Không thể đọc danh sách tệp Google Drive');
-  return res.json();
+  return parseJsonResponse<{ files: any[] }>(res, 'Không thể đọc danh sách tệp Google Drive');
 }
 
-export async function fetchDriveSheet(fileId: string, token?: string) {
+export async function fetchDriveSheet(fileId: string, token?: string): Promise<{ rows: any[][]; title?: string }> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['X-Drive-Token'] = token;
   const res = await authedFetch(`${API_BASE}/drive/fetch`, {
@@ -161,18 +190,16 @@ export async function fetchDriveSheet(fileId: string, token?: string) {
     headers,
     body: JSON.stringify({ fileId }),
   });
-  if (!res.ok) throw new Error('Không thể đọc nội dung Google Sheets');
-  return res.json();
+  return parseJsonResponse<{ rows: any[][]; title?: string }>(res, 'Không thể đọc nội dung Google Sheets');
 }
 
-export async function parseUploadedXlsx(base64Data: string, fileName: string) {
+export async function parseUploadedXlsx(base64Data: string, fileName: string): Promise<{ rows: any[][]; sheetNames?: string[] }> {
   const res = await authedFetch(`${API_BASE}/upload/parse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ base64Data, fileName }),
   });
-  if (!res.ok) throw new Error('Không thể phân tích tệp Excel tải lên');
-  return res.json();
+  return parseJsonResponse<{ rows: any[][]; sheetNames?: string[] }>(res, 'Không thể phân tích tệp Excel tải lên');
 }
 
 export async function seedDemoData(): Promise<any> {
@@ -181,9 +208,5 @@ export async function seedDemoData(): Promise<any> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ confirm: 'XOA_TOAN_BO_DU_LIEU' }),
   });
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || 'Không thể nạp dữ liệu mẫu');
-  }
-  return res.json();
+  return parseJsonResponse<any>(res, 'Không thể nạp dữ liệu mẫu');
 }

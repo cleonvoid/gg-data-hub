@@ -238,25 +238,17 @@ Lưu ý:
     });
 
     const parsed = JSON.parse(cleanJsonString(response.text || '{}'));
-    const mappings: ColumnMappingItem[] = (parsed.mappings || []).map((m: any) => ({
-      sourceColumn: m.sourceColumn,
-      targetField: (m.targetField as CanonicalFieldKey) || 'ignore',
-      confidence: m.confidence ?? 0.9,
-      reasoning: m.reasoning || '',
-      sampleValues: columnSamples[m.sourceColumn] || [],
-    }));
-
-    // Ensure all headers have a mapping
-    rawHeaders.forEach((colName) => {
-      if (!mappings.some((m) => m.sourceColumn === colName)) {
-        mappings.push({
-          sourceColumn: colName,
-          targetField: 'ignore',
-          confidence: 0.5,
-          reasoning: 'Tự động bỏ qua cột không xác định',
-          sampleValues: columnSamples[colName] || [],
-        });
-      }
+    const proposed: any[] = parsed.mappings || [];
+    const mappings: ColumnMappingItem[] = rawHeaders.map((header, idx) => {
+      const m = proposed.find((p: any) => p.sourceColumn === header);
+      return {
+        sourceColumn: header,
+        sourceIndex: idx,
+        targetField: (m?.targetField as CanonicalFieldKey) || 'ignore',
+        confidence: m?.confidence ?? (m ? 0.9 : 0.5),
+        reasoning: m?.reasoning || 'Tự động bỏ qua cột không xác định',
+        sampleValues: columnSamples[header] || [],
+      };
     });
 
     return {
@@ -269,7 +261,7 @@ Lưu ý:
     };
   } catch (_error) {
     // Heuristic fallback
-    const fallbackMappings: ColumnMappingItem[] = rawHeaders.map((header) => {
+    const fallbackMappings: ColumnMappingItem[] = rawHeaders.map((header, idx) => {
       const h = header.toLowerCase();
       let targetField: CanonicalFieldKey | 'ignore' = 'ignore';
       let reasoning = 'Khớp heuristic cơ bản';
@@ -294,6 +286,7 @@ Lưu ý:
 
       return {
         sourceColumn: header,
+        sourceIndex: idx,
         targetField,
         confidence: targetField === 'ignore' ? 0.6 : 0.85,
         reasoning,
@@ -312,9 +305,12 @@ Lưu ý:
   }
 }
 
+export const FALLBACK_EMBEDDING_MODEL = 'local-hash-v1';
+
 export interface EmbeddingResult {
   vector: number[];
   source: 'gemini' | 'fallback';
+  model: string;
 }
 
 /**
@@ -323,12 +319,18 @@ export interface EmbeddingResult {
  */
 export async function generateIdentityEmbedding(text: string): Promise<EmbeddingResult> {
   if (!process.env.GEMINI_API_KEY) {
-    return { vector: generateDeterministicFallbackEmbedding(text), source: 'fallback' };
+    return {
+      vector: generateDeterministicFallbackEmbedding(text),
+      source: 'fallback',
+      model: FALLBACK_EMBEDDING_MODEL,
+    };
   }
 
+  let usedModel = EMBEDDING_MODELS[0];
   try {
     const response = await callGeminiWithRetry(
       async (modelName) => {
+        usedModel = modelName;
         return await ai.models.embedContent({
           model: modelName,
           contents: text,
@@ -341,12 +343,20 @@ export async function generateIdentityEmbedding(text: string): Promise<Embedding
 
     const values = (response as any).embeddings?.[0]?.values || (response as any).embedding?.values;
     if (values && values.length > 0) {
-      return { vector: values, source: 'gemini' };
+      return { vector: values, source: 'gemini', model: usedModel };
     }
-    return { vector: generateDeterministicFallbackEmbedding(text), source: 'fallback' };
+    return {
+      vector: generateDeterministicFallbackEmbedding(text),
+      source: 'fallback',
+      model: FALLBACK_EMBEDDING_MODEL,
+    };
   } catch (err) {
     console.warn('Embedding API failed, using deterministic fallback (entity resolution quality degraded):', err);
-    return { vector: generateDeterministicFallbackEmbedding(text), source: 'fallback' };
+    return {
+      vector: generateDeterministicFallbackEmbedding(text),
+      source: 'fallback',
+      model: FALLBACK_EMBEDDING_MODEL,
+    };
   }
 }
 
@@ -600,7 +610,32 @@ function fallbackParseNaturalLanguageQuery(userQuery: string): NLSearchTranslati
     }
   }
 
-  // 5. Default fallback: search full name / generic text if no filters found
+  // 5. Event name check (e.g. "hội thảo ...", "hội nghị ...", "sự kiện ...", "diễn đàn ...", "workshop ...")
+  const eventPatterns = [
+    /(?:dự|tham gia|ở|tại)\s+(hội thảo\s+[a-zà-ỹ0-9\s]+)/i,
+    /(?:dự|tham gia|ở|tại)\s+(hội nghị\s+[a-zà-ỹ0-9\s]+)/i,
+    /(?:dự|tham gia|ở|tại)\s+(diễn đàn\s+[a-zà-ỹ0-9\s]+)/i,
+    /(?:dự|tham gia|ở|tại)\s+(workshop\s+[a-zà-ỹ0-9\s]+)/i,
+    /(?:dự|tham gia|ở|tại)\s+(sự kiện\s+[a-zà-ỹ0-9\s]+)/i,
+    /hội thảo\s+[a-zà-ỹ0-9\s]+/i,
+    /hội nghị\s+[a-zà-ỹ0-9\s]+/i,
+    /diễn đàn\s+[a-zà-ỹ0-9\s]+/i,
+    /workshop\s+[a-zà-ỹ0-9\s]+/i,
+  ];
+  for (const pattern of eventPatterns) {
+    const m = userQuery.match(pattern);
+    if (m) {
+      const matched = (m[1] || m[0]).trim();
+      filters.push({
+        field: 'eventNames',
+        operator: 'contains',
+        value: matched,
+      });
+      break;
+    }
+  }
+
+  // 6. Default fallback: search full name / generic text if no filters found
   if (filters.length === 0) {
     filters.push({
       field: 'canonicalName',
@@ -634,7 +669,7 @@ Các trường dữ liệu ĐƯỢC PHÉP trong hệ thống:
 - "canonicalEmail": Địa chỉ email
 - "canonicalPhone": Số điện thoại
 - "eventAppearancesCount": Số lần tham gia sự kiện (số nguyên)
-- "eventName": Tên sự kiện đã tham gia
+- "eventNames": Tên sự kiện đã tham gia
 
 Các toán tử ĐƯỢC PHÉP:
 - "contains": Chứa chuỗi ký tự (không phân biệt dấu)
@@ -667,7 +702,7 @@ Hãy trả lời theo định dạng JSON schema chuẩn. Tuyệt đối không 
                   properties: {
                     field: {
                       type: Type.STRING,
-                      description: 'One of: canonicalName, canonicalOrg, canonicalRole, canonicalEmail, canonicalPhone, eventAppearancesCount, eventName',
+                      description: 'One of: canonicalName, canonicalOrg, canonicalRole, canonicalEmail, canonicalPhone, eventAppearancesCount, eventNames',
                     },
                     operator: {
                       type: Type.STRING,

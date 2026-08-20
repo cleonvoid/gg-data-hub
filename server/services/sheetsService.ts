@@ -83,45 +83,71 @@ export async function listDriveSpreadsheets(accessToken?: string): Promise<Drive
 }
 
 /**
- * Reads data rows from a Google Sheet using the Sheets API v4.
+ * Reads rows from a Drive-hosted spreadsheet.
+ *
+ * Native Google Sheets are read through the Sheets API using the sheet's real used
+ * range — a fixed A1:Z200 window silently truncated larger files. Everything else
+ * (.xlsx, .csv) is downloaded as bytes through Drive and parsed locally, because the
+ * Sheets API cannot read non-native files.
  */
 export async function fetchGoogleSheetRows(
   spreadsheetId: string,
-  accessToken?: string,
-  range: string = 'A1:Z200'
+  accessToken?: string
 ): Promise<SheetParseResult> {
-  // If it's a demo sheet or no token, return demo row contents
   if (!accessToken || spreadsheetId.startsWith('drive_sheet_demo')) {
     return getDemoSheetContent(spreadsheetId);
   }
 
-  try {
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+  const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Google Sheets API error (${response.status}): ${errText}`);
-    }
-
-    const data = await response.json();
-    const rows = (data.values || []) as (string | number)[][];
-    const totalCols = rows.reduce((max, r) => Math.max(max, r.length), 0);
-
-    return {
-      sheetName: 'Sheet1',
-      rows,
-      totalRows: rows.length,
-      totalCols,
-    };
-  } catch (err) {
-    console.error('Failed to fetch Sheets rows:', err);
-    throw err;
+  // Ask Drive what this file actually is rather than trusting the client.
+  const metaRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${spreadsheetId}?fields=mimeType,name`,
+    { headers: authHeaders }
+  );
+  if (!metaRes.ok) {
+    throw new Error(`Google Drive API error (${metaRes.status}): ${await metaRes.text()}`);
   }
+  const meta = await metaRes.json();
+
+  if (meta.mimeType !== 'application/vnd.google-apps.spreadsheet') {
+    // Non-native file: download the bytes and reuse the local parser.
+    const dlRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${spreadsheetId}?alt=media`,
+      { headers: authHeaders }
+    );
+    if (!dlRes.ok) {
+      throw new Error(`Google Drive download error (${dlRes.status}): ${await dlRes.text()}`);
+    }
+    const buffer = Buffer.from(await dlRes.arrayBuffer());
+    return parseLocalSpreadsheetBuffer(buffer);
+  }
+
+  // Native sheet: read the first tab's used range, not a fixed window.
+  const propsRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(title))`,
+    { headers: authHeaders }
+  );
+  if (!propsRes.ok) {
+    throw new Error(`Google Sheets API error (${propsRes.status}): ${await propsRes.text()}`);
+  }
+  const props = await propsRes.json();
+  const sheetName: string = props.sheets?.[0]?.properties?.title || 'Sheet1';
+
+  // Requesting a bare sheet title returns the whole used range.
+  const valuesRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}`,
+    { headers: authHeaders }
+  );
+  if (!valuesRes.ok) {
+    throw new Error(`Google Sheets API error (${valuesRes.status}): ${await valuesRes.text()}`);
+  }
+
+  const data = await valuesRes.json();
+  const rows = (data.values || []) as (string | number)[][];
+  const totalCols = rows.reduce((max, r) => Math.max(max, r.length), 0);
+
+  return { sheetName, rows, totalRows: rows.length, totalCols };
 }
 
 /**
