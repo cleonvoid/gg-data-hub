@@ -36,6 +36,7 @@ export function App() {
   const [pendingMerges, setPendingMerges] = useState<MergeSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSeeding, setIsSeeding] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   // Filters & Pagination
   const [page, setPage] = useState(1);
@@ -80,8 +81,10 @@ export function App() {
       ]);
       setStats(statsData);
       setPendingMerges(mergesData);
-    } catch (err) {
+      setServerError(null);
+    } catch (err: any) {
       console.error('Error fetching stats/merges:', err);
+      setServerError(err?.message || 'Không thể tải dữ liệu thống kê từ máy chủ.');
     }
   }, []);
 
@@ -99,8 +102,10 @@ export function App() {
       });
       setEntities(res.items);
       setTotalEntities(res.total);
-    } catch (err) {
+      setServerError(null);
+    } catch (err: any) {
       console.error('Error loading entities:', err);
+      setServerError(err?.message || 'Không thể tải danh sách thực thể từ máy chủ.');
     } finally {
       setIsLoading(false);
     }
@@ -208,6 +213,39 @@ export function App() {
 
         {/* Content Area */}
         <main className="flex-1 p-6 overflow-y-auto">
+          {/* Server / Database Connection Error Banner */}
+          {serverError && (
+            <div className="mb-6 p-4 bg-[#FEF2F2] border border-[#FECACA] rounded-xl flex items-center justify-between space-x-3 text-[#991B1B]">
+              <div className="flex items-center space-x-3">
+                <AlertTriangle className="w-5 h-5 shrink-0 text-[#DC2626]" />
+                <div className="text-xs">
+                  <span className="font-bold">Lỗi máy chủ / Cơ sở dữ liệu:</span> {serverError}
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    loadStatsAndMerges();
+                    loadEntities();
+                  }}
+                  className="px-3 py-1.5 bg-[#DC2626] text-white text-xs font-semibold rounded-lg hover:bg-[#B91C1C] transition-colors cursor-pointer"
+                >
+                  Thử lại
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServerError(null)}
+                  className="text-[#991B1B] hover:text-[#7F1D1D] p-1 rounded-lg hover:bg-[#FEE2E2] transition-colors shrink-0 cursor-pointer"
+                  title="Đóng thông báo"
+                  aria-label="Đóng thông báo"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Persistent Fallback Embedding Warning Banner */}
           {fallbackEmbeddingCount > 0 && (
             <div className="mb-6 p-3.5 bg-[#FFFBEB] border border-[#FDE68A] rounded-xl flex items-center justify-between space-x-3 text-[#92400E]">

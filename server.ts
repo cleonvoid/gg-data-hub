@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config({ override: true });
 
 import { apiRouter } from './server/routes/api.js';
 import { db } from './server/db/index.js';

@@ -30,20 +30,37 @@ async function authedFetch(url: string, options: RequestInit = {}): Promise<Resp
 }
 
 async function parseJsonResponse<T>(res: Response, fallbackErrorMsg: string): Promise<T> {
-  const contentType = res.headers.get('content-type') || '';
-  if (!res.ok) {
-    if (contentType.includes('application/json')) {
-      const errorJson = await res.json().catch(() => null);
-      throw new Error(errorJson?.error || errorJson?.detail || fallbackErrorMsg);
+  const text = await res.text().catch(() => '');
+  let json: any = null;
+  if (text) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
     }
-    const text = await res.text().catch(() => '');
-    throw new Error(fallbackErrorMsg + (text && text.length < 150 ? `: ${text}` : ''));
   }
-  if (!contentType.includes('application/json')) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Định dạng phản hồi không hợp lệ từ máy chủ (${res.status})` + (text && text.length < 150 ? `: ${text}` : ''));
+
+  if (!res.ok) {
+    if (json && (json.error || json.detail || json.message)) {
+      throw new Error(json.error || json.detail || json.message);
+    }
+    const isHtml = text.startsWith('<!DOCTYPE html') || text.includes('<html');
+    if (isHtml) {
+      throw new Error(`${fallbackErrorMsg}: Máy chủ đang khởi động hoặc chưa sẵn sàng (Mã ${res.status}). Vui lòng tải lại trang.`);
+    }
+    throw new Error(fallbackErrorMsg + (text && text.length < 150 ? `: ${text}` : ` (Mã lỗi ${res.status})`));
   }
-  return res.json();
+
+  if (json !== null) {
+    return json as T;
+  }
+
+  const isHtml = text.startsWith('<!DOCTYPE html') || text.includes('<html');
+  if (isHtml) {
+    throw new Error(`${fallbackErrorMsg}: Máy chủ đang khởi động hoặc phản hồi không đúng định dạng. Vui lòng tải lại trang.`);
+  }
+
+  throw new Error(`Định dạng phản hồi không hợp lệ từ máy chủ (${res.status})` + (text && text.length < 150 ? `: ${text}` : ''));
 }
 
 export async function fetchStats(): Promise<IngestionStats> {

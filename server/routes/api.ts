@@ -79,7 +79,9 @@ apiRouter.get('/entities', async (req: AuthenticatedRequest, res: Response) => {
     if (structuredFilters) {
       try {
         parsedFilters = JSON.parse(String(structuredFilters));
-      } catch {}
+      } catch {
+        return res.status(400).json({ error: 'structuredFilters was not valid JSON' });
+      }
     }
 
     const result = await db.queryEntities(orgId, {
@@ -495,4 +497,9 @@ apiRouter.post('/seed', async (req: AuthenticatedRequest, res: Response) => {
   } catch (err: any) {
     handleRouteError(res, err, 'Không thể nạp dữ liệu mẫu');
   }
+});
+
+// Fallback 404 for unmatched /api routes to prevent falling through to Vite SPA HTML handler
+apiRouter.use((req: AuthenticatedRequest, res: Response) => {
+  res.status(404).json({ error: `API endpoint không tồn tại: ${req.method} ${req.originalUrl}` });
 });
