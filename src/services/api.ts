@@ -7,6 +7,7 @@ import {
   SchemaMappingProposal,
   NLSearchTranslationResponse,
   ColumnMappingItem,
+  DriveFileItem,
 } from '../types/index';
 import { auth } from './firebase';
 
@@ -173,13 +174,13 @@ export async function translateSearch(query: string): Promise<NLSearchTranslatio
   return parseJsonResponse<NLSearchTranslationResponse>(res, 'Lỗi khi biên dịch câu truy vấn');
 }
 
-export async function listDriveFiles(token?: string): Promise<{ files: any[] }> {
+export async function listDriveFiles(token?: string): Promise<DriveFileItem[]> {
   const headers: Record<string, string> = {};
   // Drive's OAuth access token travels in its own header: Authorization is reserved
   // for the Firebase ID token that requireAuth verifies, and authedFetch overwrites it.
   if (token) headers['X-Drive-Token'] = token;
   const res = await authedFetch(`${API_BASE}/drive/files`, { headers });
-  return parseJsonResponse<{ files: any[] }>(res, 'Không thể đọc danh sách tệp Google Drive');
+  return parseJsonResponse<DriveFileItem[]>(res, 'Không thể đọc danh sách tệp Google Drive');
 }
 
 export async function fetchDriveSheet(fileId: string, token?: string): Promise<{ rows: any[][]; title?: string }> {
@@ -193,13 +194,13 @@ export async function fetchDriveSheet(fileId: string, token?: string): Promise<{
   return parseJsonResponse<{ rows: any[][]; title?: string }>(res, 'Không thể đọc nội dung Google Sheets');
 }
 
-export async function parseUploadedXlsx(base64Data: string, fileName: string): Promise<{ rows: any[][]; sheetNames?: string[] }> {
+export async function parseUploadedXlsx(base64Data: string, fileName: string): Promise<{ rows: any[][]; sheetNames?: string[]; fileId?: string }> {
   const res = await authedFetch(`${API_BASE}/upload/parse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ base64Data, fileName }),
   });
-  return parseJsonResponse<{ rows: any[][]; sheetNames?: string[] }>(res, 'Không thể phân tích tệp Excel tải lên');
+  return parseJsonResponse<{ rows: any[][]; sheetNames?: string[]; fileId?: string }>(res, 'Không thể phân tích tệp Excel tải lên');
 }
 
 export async function seedDemoData(): Promise<any> {

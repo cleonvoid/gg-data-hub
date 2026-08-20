@@ -139,9 +139,18 @@ export interface FilterParams {
 }
 
 export interface StructuredQueryFilter {
-  field: 'canonicalName' | 'canonicalOrg' | 'canonicalRole' | 'canonicalEmail' | 'canonicalPhone' | 'eventAppearancesCount' | 'eventNames' | 'eventName' | 'eventDate';
+  field: 'canonicalName' | 'canonicalOrg' | 'canonicalRole' | 'canonicalEmail' | 'canonicalPhone' | 'eventAppearancesCount' | 'eventNames' | 'eventDate';
   operator: 'equals' | 'contains' | 'startsWith' | 'greaterThan' | 'lessThan' | 'in';
   value: string | number;
+}
+
+export interface DriveFileItem {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime: string;
+  size?: string;
+  thumbnailLink?: string;
 }
 
 export interface NLSearchTranslationResponse {

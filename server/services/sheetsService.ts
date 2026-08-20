@@ -1,13 +1,7 @@
 import * as XLSX from 'xlsx';
+import { DriveFileItem } from '../../src/types/index.js';
 
-export interface DriveFileItem {
-  id: string;
-  name: string;
-  mimeType: string;
-  modifiedTime: string;
-  size?: string;
-  thumbnailLink?: string;
-}
+export type { DriveFileItem };
 
 export interface SheetParseResult {
   sheetName: string;
@@ -134,9 +128,10 @@ export async function fetchGoogleSheetRows(
   const props = await propsRes.json();
   const sheetName: string = props.sheets?.[0]?.properties?.title || 'Sheet1';
 
-  // Requesting a bare sheet title returns the whole used range.
+  // Requesting a quoted sheet title returns the whole used range.
+  const quotedSheet = `'${sheetName.replace(/'/g, "''")}'`;
   const valuesRes = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(quotedSheet)}`,
     { headers: authHeaders }
   );
   if (!valuesRes.ok) {

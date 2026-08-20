@@ -20,7 +20,7 @@ import {
   MergeSuggestion,
 } from '../../src/types/index.js';
 import { buildIdentityString, buildIdentityKey } from '../utils/vietnamese.js';
-import { extractRowFields } from '../utils/mapping.js';
+import { extractRowFields, stableStringify } from '../utils/mapping.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/requireAuth.js';
 
 export const apiRouter = Router();
@@ -182,12 +182,12 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
         continue;
       }
 
-      // Deterministic per (org, file, row): re-importing the same sheet must not
-      // create a second copy of every record.
+      // Deterministic per (org, file, row content): re-importing the same sheet must not
+      // create a second copy of every record, and inserting rows at the top must not cause duplicate churn.
       const recId =
         'raw_' +
         createHash('sha1')
-          .update(`${orgId}|${sourceFileId || sourceFileName}|${(headerRowIndex ?? 0) + 1 + rIdx}`)
+          .update(`${orgId}|${sourceFileId || sourceFileName}|${stableStringify(rawJson)}`)
           .digest('hex')
           .slice(0, 24);
 
@@ -315,6 +315,7 @@ apiRouter.post('/ingest', async (req: AuthenticatedRequest, res: Response) => {
           canonicalRole: parsedFields.role,
           canonicalEmail: parsedFields.email,
           canonicalPhone: parsedFields.phone,
+          eventNames: parsedFields.eventName ? [parsedFields.eventName.trim()] : [],
           embedding,
           embeddingModel: embResult.model,
           orgId,
@@ -456,7 +457,8 @@ apiRouter.post('/upload/parse', (req: AuthenticatedRequest, res: Response) => {
 
     const buffer = Buffer.from(base64Data.split(',').pop() || base64Data, 'base64');
     const parsed = parseLocalSpreadsheetBuffer(buffer);
-    res.json(parsed);
+    const fileId = 'local_' + createHash('sha1').update(buffer).digest('hex').slice(0, 16);
+    res.json({ ...parsed, fileId });
   } catch (err: any) {
     handleRouteError(res, err, 'Không thể phân tích tệp Excel tải lên');
   }

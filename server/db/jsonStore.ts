@@ -422,10 +422,14 @@ export class JsonDataStore implements DataStore {
     }
 
     // Distinct events, not row count: one attendee list can contribute many rows.
-    canonical.eventAppearancesCount = Math.max(1, canonical.eventNames.length);
+    // Distinct events, not row count: one attendee list can contribute many rows.
+    const approvedLinks = this.getEntityLinksForCanonical(canonical.id);
+    canonical.eventAppearancesCount =
+      canonical.eventNames.length > 0
+        ? canonical.eventNames.length
+        : Math.max(1, approvedLinks.length);
 
     // Recalculate source files
-    const approvedLinks = this.getEntityLinksForCanonical(canonical.id);
     const uniqueFiles = new Set<string>();
     for (const l of approvedLinks) {
       const r = this.rawRecords.get(l.rawRecordId);
@@ -435,9 +439,10 @@ export class JsonDataStore implements DataStore {
     canonical.sourceFilesCount = Math.max(1, uniqueFiles.size);
     canonical.lastSeenAt = new Date().toISOString();
 
-    // Maintain embedding on canonical entity if not set
+    // Maintain embedding and model tag on canonical entity if not set
     if (!canonical.embedding && raw.embedding) {
       canonical.embedding = raw.embedding;
+      canonical.embeddingModel = raw.embeddingModel;
     }
 
     await this.updateCanonicalEntity(orgId, canonical.id, canonical);

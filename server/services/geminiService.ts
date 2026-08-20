@@ -510,7 +510,7 @@ Hãy trả về kết quả JSON có cấu trúc chính xác theo schema yêu c�
  * Deterministic rule-based query parser for Vietnamese and English event queries.
  * Acts as high-accuracy offline fallback when API limits or network issues occur.
  */
-function fallbackParseNaturalLanguageQuery(userQuery: string): NLSearchTranslationResponse {
+export function fallbackParseNaturalLanguageQuery(userQuery: string): NLSearchTranslationResponse {
   const queryLower = userQuery.toLowerCase().trim();
   const filters: StructuredQueryFilter[] = [];
 
@@ -552,7 +552,18 @@ function fallbackParseNaturalLanguageQuery(userQuery: string): NLSearchTranslati
     'ai',
   ];
   for (const role of roleKeywords) {
-    if (queryLower.includes(role)) {
+    const escapedRole = role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escapedRole}(?=[^\\p{L}\\p{N}]|$)`, 'iu');
+    if (regex.test(queryLower)) {
+      if (role === 'ai') {
+        const isLeadingInterrogative = /^\s*ai(?=[^\p{L}\p{N}]|$)/iu.test(queryLower);
+        const remainder = queryLower.replace(/^\s*ai(?=[^\p{L}\p{N}]|$)/iu, '');
+        const hasOtherAiMatch = /(?:^|[^\p{L}\p{N}])ai(?=[^\p{L}\p{N}]|$)/iu.test(remainder);
+        if (isLeadingInterrogative && !hasOtherAiMatch) {
+          continue;
+        }
+      }
+
       filters.push({
         field: 'canonicalRole',
         operator: 'contains',
@@ -625,7 +636,9 @@ function fallbackParseNaturalLanguageQuery(userQuery: string): NLSearchTranslati
   for (const pattern of eventPatterns) {
     const m = userQuery.match(pattern);
     if (m) {
-      const matched = (m[1] || m[0]).trim();
+      let matched = (m[1] || m[0]).trim();
+      // Stop event-name capture at a trailing locative clause (" ở …", " tại …")
+      matched = matched.replace(/\s+(?:ở|tại)\s+.*$/iu, '').trim();
       filters.push({
         field: 'eventNames',
         operator: 'contains',

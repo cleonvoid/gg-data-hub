@@ -134,6 +134,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       try {
         const base64 = evt.target?.result as string;
         const parsed = await parseUploadedXlsx(base64, file.name);
+        if (parsed.fileId) {
+          setFileId(parsed.fileId);
+        }
         setRawRows(parsed.rows || []);
 
         const proposal = await inferSchema(parsed.rows, file.name);

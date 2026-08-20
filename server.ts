@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 
-dotenv.config({ override: true });
+dotenv.config();
 
 import { apiRouter } from './server/routes/api.js';
 import { db } from './server/db/index.js';
@@ -28,11 +28,21 @@ async function startServer() {
   // API Routes
   app.use('/api', apiRouter);
 
-  // Boot-time reachability check (non-fatal warning so dev server never crashes at startup)
+  // Boot-time reachability check (non-fatal warning for local dev, fatal in production for Firestore)
   try {
     await db.getAllCanonicalEntities('org_default');
     console.log('[Startup] Database reachable.');
   } catch (e: any) {
+    if (process.env.NODE_ENV === 'production' && process.env.DATA_STORE === 'firestore') {
+      console.error(
+        '[Startup] Fatal: Firestore database unreachable in production. ' +
+        'Please verify that the service account has the "roles/datastore.user" IAM role, ' +
+        `and that FIREBASE_PROJECT_ID (${process.env.FIREBASE_PROJECT_ID || 'unset'}) and ` +
+        `FIRESTORE_DATABASE_ID (${process.env.FIRESTORE_DATABASE_ID || 'unset'}) are configured correctly.`,
+        e
+      );
+      process.exit(1);
+    }
     console.warn('[Startup] Reachability check warning:', e);
   }
 

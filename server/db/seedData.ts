@@ -21,8 +21,12 @@ export async function seedInitialEventData(orgId: string = 'org_default') {
   canonical1.aliases = ['TS. Nguyễn Văn An', 'Nguyen Van An', 'Nguyễn V. An'];
   canonical1.alternateOrgs = ['Viện Công nghệ Thông tin - VAST', 'Vien CNTT VAST'];
   canonical1.alternateEmails = ['an.nguyen@vast.gov.vn', 'annguyen.ai.vast@gmail.com'];
-  canonical1.eventAppearancesCount = 3;
-  canonical1.sourceFilesCount = 3;
+  canonical1.eventNames = [
+    'Hội Thảo Chuyển Đổi Số Khu Vực Phía Nam 2025',
+    'Hội Nghị Thượng Đỉnh AI Vietnam Summit 2025',
+  ];
+  canonical1.eventAppearancesCount = 2;
+  canonical1.sourceFilesCount = 2;
   await db.updateCanonicalEntity(orgId, canonical1.id, canonical1);
 
   const canonical2 = await db.createCanonicalEntity(orgId, {
@@ -37,8 +41,12 @@ export async function seedInitialEventData(orgId: string = 'org_default') {
   canonical2.aliases = ['ThS. Trần Thị Mai Lan', 'Tran Thi Mai Lan', 'Trần Mai Lan'];
   canonical2.alternateOrgs = ['FPT Corporation', 'Tập đoàn FPT', 'CTCP FPT'];
   canonical2.alternateEmails = ['lan.ttm@fpt.com', 'lan.tran@fpt.com.vn'];
-  canonical2.eventAppearancesCount = 3;
-  canonical2.sourceFilesCount = 3;
+  canonical2.eventNames = [
+    'Hội Thảo Chuyển Đổi Số Khu Vực Phía Nam 2025',
+    'Hội Nghị Thượng Đỉnh AI Vietnam Summit 2025',
+  ];
+  canonical2.eventAppearancesCount = 2;
+  canonical2.sourceFilesCount = 2;
   await db.updateCanonicalEntity(orgId, canonical2.id, canonical2);
 
   const canonical3 = await db.createCanonicalEntity(orgId, {
@@ -53,6 +61,10 @@ export async function seedInitialEventData(orgId: string = 'org_default') {
   canonical3.aliases = ['PGS.TS. Phạm Minh Tuấn', 'Pham Minh Tuan', 'TS. Phạm Minh Tuấn'];
   canonical3.alternateOrgs = ['ĐH Bách Khoa TP.HCM', 'HCMUT - Bach Khoa'];
   canonical3.alternateEmails = ['pmtuan@hcmut.edu.vn', 'tuanpham.ai@gmail.com'];
+  canonical3.eventNames = [
+    'Hội Thảo Chuyển Đổi Số Khu Vực Phía Nam 2025',
+    'Hội Nghị Thượng Đỉnh AI Vietnam Summit 2025',
+  ];
   canonical3.eventAppearancesCount = 2;
   canonical3.sourceFilesCount = 2;
   await db.updateCanonicalEntity(orgId, canonical3.id, canonical3);
@@ -68,6 +80,10 @@ export async function seedInitialEventData(orgId: string = 'org_default') {
   });
   canonical4.aliases = ['Lê Hoàng Long', 'Ông Lê Hoàng Long', 'Le Hoang Long'];
   canonical4.alternateEmails = ['longlh.skhcn@tphcm.gov.vn', 'longlh@gmail.com'];
+  canonical4.eventNames = [
+    'Hội Thảo Chuyển Đổi Số Khu Vực Phía Nam 2025',
+    'Tập huấn Khởi nghiệp Đổi mới Sáng tạo 2025',
+  ];
   canonical4.eventAppearancesCount = 2;
   canonical4.sourceFilesCount = 2;
   await db.updateCanonicalEntity(orgId, canonical4.id, canonical4);
@@ -83,6 +99,10 @@ export async function seedInitialEventData(orgId: string = 'org_default') {
   });
   canonical5.aliases = ['Đặng Quốc Bảo', 'Dang Quoc Bao'];
   canonical5.alternateOrgs = ['Tập đoàn Viettel', 'Viettel Solutions'];
+  canonical5.eventNames = [
+    'Hội Thảo Chuyển Đổi Số Khu Vực Phía Nam 2025',
+    'Tập huấn Khởi nghiệp Đổi mới Sáng tạo 2025',
+  ];
   canonical5.eventAppearancesCount = 2;
   canonical5.sourceFilesCount = 2;
   await db.updateCanonicalEntity(orgId, canonical5.id, canonical5);
@@ -96,6 +116,9 @@ export async function seedInitialEventData(orgId: string = 'org_default') {
     canonicalPhone: '0944556677',
     orgId,
   });
+  canonical6.eventNames = [
+    'Hội Nghị Thượng Đỉnh AI Vietnam Summit 2025',
+  ];
   canonical6.eventAppearancesCount = 1;
   canonical6.sourceFilesCount = 1;
   await db.updateCanonicalEntity(orgId, canonical6.id, canonical6);
@@ -109,6 +132,9 @@ export async function seedInitialEventData(orgId: string = 'org_default') {
     canonicalPhone: '0922334455',
     orgId,
   });
+  canonical7.eventNames = [
+    'Tập huấn Khởi nghiệp Đổi mới Sáng tạo 2025',
+  ];
   canonical7.eventAppearancesCount = 1;
   canonical7.sourceFilesCount = 1;
   await db.updateCanonicalEntity(orgId, canonical7.id, canonical7);
